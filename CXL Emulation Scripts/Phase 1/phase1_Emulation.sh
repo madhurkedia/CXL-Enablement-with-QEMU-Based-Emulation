@@ -75,7 +75,7 @@ run_phase1_basic() {
         -device pxb-cxl,bus_nr=12,bus=pcie.0,id=cxl.1 \
         -device cxl-rp,port=0,bus=cxl.1,id=rp0,chassis=0,slot=0 \
         -device cxl-upstream,bus=rp0,id=us0 \
-        -device cxl-downstream,port=0,bus=us0,id=ds0,chassis=0,slot=0 \
+        -device cxl-downstream,port=0,bus=us0,id=ds0,chassis=0,slot=1 \
         -device cxl-type3,bus=ds0,persistent-memdev=cxl-mem0,lsa=cxl-lsa0,id=cxl-pmem0,sn=0x1 \
         \
         -M cxl-fmw.0.targets.0=cxl.1,cxl-fmw.0.size=8G,cxl-fmw.0.interleave-granularity=4k
