@@ -61,8 +61,8 @@ This project was developed as part of the **HPE CPP3 Program**, representing a c
 | Name | GitHub Profile |
 | :--- | :--- |
 | **Aadhar Bindal** | [@Aadharbindal](https://github.com/Aadharbindal)
-| **Madhur Kedia** | [@madhurkedia](https://github.com/madhurkedia) 
-| **Ronak Khandelwal** | [@ronakKhandelwal](https://github.com/ronakKhandelwal)
+| **Madhur Kedia** | [@madhurkedia](https://github.com/madhurkedia)
+| **Ronak Khandelwal** | [@ronakKhandelwal](https://github.com/Ronak-Khandelwal)
 | **Virendra Singh Rathore** | [@virendrasinghrathore](https://github.com/virendrasinghrathore1412) 
 | **Vishwas Saini** | [@vishwassaini](https://github.com/noonecanseeusall-ship-it) 
 
