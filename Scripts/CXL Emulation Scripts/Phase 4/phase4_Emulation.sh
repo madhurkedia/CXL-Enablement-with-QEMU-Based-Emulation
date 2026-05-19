@@ -42,6 +42,7 @@ prepare_backing_files_phase4() {
     info "Preparing Phase 4 backing files (4 × 1 GiB mem + 4 × 256 MiB lsa)..."
 
     mkdir -p "${IMAGES}"
+    mkdir -p "${WORKSPACE}/reports"
     cd "${IMAGES}"
 
     # Switch A memory devices
