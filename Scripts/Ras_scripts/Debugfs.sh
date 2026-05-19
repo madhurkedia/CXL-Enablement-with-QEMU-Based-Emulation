@@ -1,8 +1,6 @@
 #!/bin/bash
-# =============================================================================
 # CXL RAS Test Suite (QEMU / Debugfs Based)
 # Tests: Media Error (Poison) + Stress + Kernel Observation + Recovery
-# =============================================================================
 set -uo pipefail
 
 REPORT_DIR="/root/cxl_ras_results"
@@ -20,18 +18,15 @@ skip() { echo "[SKIP] $*"; ((SKIP++)); }
 info() { echo "[INFO] $*"; }
 warn() { echo "[WARN] $*"; }
 
-echo "══════════════════════════════════════════════"
 echo "   CXL RAS TEST SUITE (DEBUGFS BASED)"
-echo "══════════════════════════════════════════════"
 info "Kernel : $(uname -r)"
 info "Host   : $(hostname)"
 info "Date   : $(date)"
 info "Log    : $LOG"
 echo ""
 
-# -----------------------------------------------------------------------------
-# Step 0: Mount debugfs if not already mounted
-# -----------------------------------------------------------------------------
+#Mount debugfs if not already mounted
+
 echo "=== [0] Checking debugfs ==="
 if ! mountpoint -q /sys/kernel/debug; then
     mount -t debugfs debugfs /sys/kernel/debug && pass "debugfs mounted" || { fail "Could not mount debugfs"; exit 1; }
@@ -40,10 +35,9 @@ else
 fi
 echo ""
 
-# -----------------------------------------------------------------------------
+
 # Step 1: Detect CXL mem devices
-# -----------------------------------------------------------------------------
-echo "=== [1] Detecting CXL memory devices ==="
+echo " [1] Detecting CXL memory devices "
 CXL_MEMS=$(ls /sys/bus/cxl/devices/ 2>/dev/null | grep -E "^mem[0-9]+" || true)
 if [[ -z "$CXL_MEMS" ]]; then
     fail "No CXL mem devices found in /sys/bus/cxl/devices/"
@@ -63,18 +57,17 @@ fi
 pass "Using debugfs device: $MEM at $DBG"
 echo ""
 
-# -----------------------------------------------------------------------------
+
 # Step 2: Baseline state
-# -----------------------------------------------------------------------------
-echo "=== [2] Baseline kernel state ==="
+echo "[2] Baseline kernel state"
 info "CXL-related dmesg at baseline:"
 dmesg | grep -iE "cxl|pmem|nvdimm" | tail -20 || true
 echo ""
 
-# -----------------------------------------------------------------------------
+
 # Step 3: Provision CXL namespace (required for /dev/pmem0)
-# -----------------------------------------------------------------------------
-echo "=== [3] Provisioning CXL region and namespace ==="
+
+echo " [3] Provisioning CXL region and namespace "
 if command -v cxl &>/dev/null; then
     info "Attempting to create region..."
     cxl create-region -m "$MEM" -d decoder0.0 2>/dev/null && pass "Region created" || warn "Region creation skipped (may already exist)"
@@ -89,10 +82,10 @@ else
 fi
 echo ""
 
-# -----------------------------------------------------------------------------
+
 # Step 4: Inject media poison
-# -----------------------------------------------------------------------------
-echo "=== [4] Injecting CXL poison (media error simulation) ==="
+
+echo "[4] Injecting CXL poison (media error simulation)"
 if [[ -f "$DBG/inject_poison" ]]; then
     if echo 0x0 > "$DBG/inject_poison" 2>/dev/null; then
         pass "Poison injected at address 0x0"
@@ -104,10 +97,10 @@ else
 fi
 echo ""
 
-# -----------------------------------------------------------------------------
+
 # Step 5: Verify poison list
-# -----------------------------------------------------------------------------
-echo "=== [5] Verifying poison list ==="
+
+echo "[5] Verifying poison list"
 if [[ -f "$DBG/poison_list" ]]; then
     POISON_OUT=$(cat "$DBG/poison_list" 2>/dev/null || true)
     if [[ -n "$POISON_OUT" ]]; then
@@ -121,10 +114,9 @@ else
 fi
 echo ""
 
-# -----------------------------------------------------------------------------
+
 # Step 6: Memory stress test
-# -----------------------------------------------------------------------------
-echo "=== [6] Memory access stress test ==="
+echo "[6] Memory access stress test"
 PMEM="/dev/pmem0"
 if [[ -b "$PMEM" ]]; then
     info "Writing stress pattern to $PMEM..."
@@ -145,18 +137,17 @@ else
 fi
 echo ""
 
-# -----------------------------------------------------------------------------
+
 # Step 7: Kernel RAS observation
-# -----------------------------------------------------------------------------
-echo "=== [7] Kernel RAS log observation ==="
+
+echo "[7] Kernel RAS log observation"
 info "CXL / RAS / error related dmesg:"
 dmesg | grep -iE "cxl|poison|error|mce|ndctl|pmem|nvdimm|hardware" | tail -60 || true
 echo ""
 
-# -----------------------------------------------------------------------------
+
 # Step 8: CXL event summary via cxl tool
-# -----------------------------------------------------------------------------
-echo "=== [8] CXL event and poison summary ==="
+echo "[8] CXL event and poison summary"
 if command -v cxl &>/dev/null; then
     info "cxl list -P -v (poison list):"
     cxl list -P -v 2>/dev/null || warn "cxl list -P failed"
@@ -168,10 +159,9 @@ else
 fi
 echo ""
 
-# -----------------------------------------------------------------------------
+
 # Step 9: Clear poison (recovery test)
-# -----------------------------------------------------------------------------
-echo "=== [9] Clearing poison (recovery) ==="
+echo "[9] Clearing poison (recovery)"
 if [[ -f "$DBG/clear_poison" ]]; then
     if echo 0x0 > "$DBG/clear_poison" 2>/dev/null; then
         pass "Poison cleared at address 0x0"
@@ -183,10 +173,10 @@ else
 fi
 echo ""
 
-# -----------------------------------------------------------------------------
+
 # Step 10: Post-recovery validation
-# -----------------------------------------------------------------------------
-echo "=== [10] Post-recovery access validation ==="
+
+echo "[10] Post-recovery access validation"
 if [[ -b "$PMEM" ]]; then
     if dd if=/dev/zero of="$PMEM" bs=4k count=512 oflag=direct 2>/dev/null; then
         pass "Post-recovery write access succeeded"
@@ -203,20 +193,14 @@ else
 fi
 echo ""
 
-# -----------------------------------------------------------------------------
 # Step 11: Final dmesg snapshot
-# -----------------------------------------------------------------------------
-echo "=== [11] Final dmesg snapshot ==="
+echo "[11] Final dmesg snapshot"
 dmesg | grep -iE "cxl|poison|error|mce" | tail -30 || true
 echo ""
 
-# -----------------------------------------------------------------------------
+
 # Final summary
-# -----------------------------------------------------------------------------
-echo "══════════════════════════════════════════════"
 echo "   RAS TEST COMPLETE"
-echo "══════════════════════════════════════════════"
-echo ""
 echo "[RESULTS]"
 echo "  PASS : $PASS"
 echo "  FAIL : $FAIL"
@@ -236,11 +220,7 @@ echo "  9.  Poison clear / recovery"
 echo "  10. Post-recovery validation"
 echo "  11. Final dmesg snapshot"
 echo ""
-echo "NOTE: This validates the MEDIA ERROR RAS path (debugfs based)."
-echo "      AER/UCE injection requires additional kernel + QEMU support."
-echo ""
 info "Log saved to: $LOG"
-echo "══════════════════════════════════════════════"
 
 if [[ $FAIL -gt 0 ]]; then
     exit 1
