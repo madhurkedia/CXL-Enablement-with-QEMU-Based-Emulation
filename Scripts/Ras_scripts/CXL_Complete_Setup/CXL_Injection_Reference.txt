@@ -1,0 +1,247 @@
+#!/bin/bash
+# CXL Error Injection Reference
+# DO NOT RUN THIS FILE — it is a step-by-step guide only.
+# Commands must be run manually in the correct terminal.
+#
+#
+# CXL ERROR INJECTION — SIGNAL FLOW DIAGRAM
+#
+#   QMP Terminal (host)
+#        |
+#        |  cxl-inject-*  (JSON over TCP :4444)
+#        v
+#   QEMU /machine/peripheral/cxl1
+#        |
+#        |--- Event Log errors (General Media / DRAM / Memory Module)
+#        |         |
+#        |         v
+#        |    MSI-X IRQ 38  -->  kernel event log driver
+#        |         |
+#        |         v
+#        |    ftrace: cxl_general_media / cxl_dram / cxl_memory_module
+#        |
+#        |--- Poison
+#        |         |
+#        |         v
+#        |    No IRQ — polled via trigger_poison_list
+#        |         |
+#        |         v
+#        |    ftrace: cxl_poison  -->  pages marked bad (offline)
+#        |
+#        +--- AER errors (Correctable / Uncorrectable Fatal)
+#                  |
+#                  v
+#             PCIe AER registers
+#                  |
+#                  v
+#             aerdrv  IRQ 25
+#                  |
+#                  |-- Correctable:  logged + counted, device stays online
+#                  |
+#                  +-- Uncorrectable Fatal:  link reset (~51ms downtime)
+#                            |
+#                            v
+#                        ftrace: cxl_aer_*  +  dmesg recovery sequence
+#
+#
+# PREREQUISITES (do this after every QEMU boot before any injection):
+#
+#   GUEST TERMINAL:
+#     sudo su
+#     cxl create-region -d decoder0.0 -m mem0 -s 512M -t ram
+#     echo 1 > /sys/kernel/debug/tracing/tracing_on
+#     echo 1 > /sys/kernel/debug/tracing/events/cxl/enable
+#     echo > /sys/kernel/debug/tracing/trace
+#
+#   QMP TERMINAL (separate host terminal):
+#     nc 127.0.0.1 4444
+#     {"execute": "qmp_capabilities"}
+#
+# DEVICE MAPPING:
+#   /machine/peripheral/cxl1  ->  guest mem1  (use for ALL injections)
+#   /machine/peripheral/cxl0  ->  guest mem0  (not used for injection)
+#
+# CLEAN STATE BETWEEN ERRORS:
+#   echo > /sys/kernel/debug/tracing/trace      (clear trace buffer)
+#   pkill -f qemu-system-x86_64 && sleep 2 && ./start-cxl.sh  (full reset)
+#
+
+
+# ERROR 1: GENERAL MEDIA EVENT
+# Path   : CXL Event Log -> MSI-X IRQ -> kernel trace
+# Impact : Zero — informational only, device stays fully online
+#
+#
+# QMP TERMINAL — inject (all 4 log levels):
+#
+# {"execute": "cxl-inject-general-media-event", "arguments": {"path": "/machine/peripheral/cxl1", "type": 0, "flags": 0, "dpa": 4563402752, "descriptor": 0, "log": "informational", "transaction-type": 0}}
+# {"execute": "cxl-inject-general-media-event", "arguments": {"path": "/machine/peripheral/cxl1", "type": 0, "flags": 0, "dpa": 4563402752, "descriptor": 0, "log": "warning", "transaction-type": 0}}
+# {"execute": "cxl-inject-general-media-event", "arguments": {"path": "/machine/peripheral/cxl1", "type": 0, "flags": 0, "dpa": 4563402752, "descriptor": 0, "log": "failure", "transaction-type": 0}}
+# {"execute": "cxl-inject-general-media-event", "arguments": {"path": "/machine/peripheral/cxl1", "type": 0, "flags": 0, "dpa": 4563402752, "descriptor": 0, "log": "fatal", "transaction-type": 0}}
+#
+# GUEST TERMINAL — observe:
+# cat /proc/interrupts | grep "0e:00"
+# cat /sys/kernel/debug/tracing/trace | grep "cxl_general_media" | fold -w 200
+# cxl list -H -m mem1
+# dmesg | tail -5
+#
+# WHAT TO SEE:
+#   IRQ 38 (MSI-X event log vector) increments by 1 per injection
+#   Trace shows: cxl_general_media memdev=mem1 log=Informational/Warning/Failure/Fatal
+#   Device health and ram_size unchanged — no recovery action taken
+
+
+# ERROR 2: DRAM EVENT
+# Path   : CXL Event Log -> MSI-X IRQ -> kernel trace
+# Impact : Zero — same path as general media, different trace fields
+#
+# QMP TERMINAL — inject (all 4 log levels):
+#
+# {"execute": "cxl-inject-dram-event", "arguments": {"path": "/machine/peripheral/cxl1", "type": 0, "flags": 0, "dpa": 4563402752, "descriptor": 0, "log": "informational", "transaction-type": 0}}
+# {"execute": "cxl-inject-dram-event", "arguments": {"path": "/machine/peripheral/cxl1", "type": 0, "flags": 0, "dpa": 4563402752, "descriptor": 0, "log": "warning", "transaction-type": 0}}
+# {"execute": "cxl-inject-dram-event", "arguments": {"path": "/machine/peripheral/cxl1", "type": 0, "flags": 0, "dpa": 4563402752, "descriptor": 0, "log": "failure", "transaction-type": 0}}
+# {"execute": "cxl-inject-dram-event", "arguments": {"path": "/machine/peripheral/cxl1", "type": 0, "flags": 0, "dpa": 4563402752, "descriptor": 0, "log": "fatal", "transaction-type": 0}}
+#
+# GUEST TERMINAL — observe:
+# cat /proc/interrupts | grep "0e:00"
+# cat /sys/kernel/debug/tracing/trace | grep "cxl_dram" | fold -w 200
+# dmesg | tail -5
+#
+# WHAT TO SEE:
+#   IRQ 38 increments per injection (same vector as general media)
+#   Trace shows: cxl_dram memdev=mem1 log=Informational/Warning/Failure/Fatal
+#   Device stays online — no recovery needed
+
+
+# ERROR 3: MEMORY MODULE EVENT
+# Path   : CXL Event Log -> MSI-X IRQ -> kernel trace
+# Impact : Zero — but carries full device health snapshot including temperature
+# Note   : Only error type that reports temperature, life_used, error counts
+#
+#
+# QMP TERMINAL — inject all 4 levels with escalating health values:
+#
+# Informational — healthy device baseline:
+# {"execute": "cxl-inject-memory-module-event", "arguments": {"path": "/machine/peripheral/cxl1", "log": "informational", "flags": 0, "type": 0, "health-status": 0, "media-status": 0, "additional-status": 0, "life-used": 50, "temperature": 35, "dirty-shutdown-count": 0, "corrected-volatile-error-count": 5, "corrected-persistent-error-count": 0}}
+#
+# Warning — device showing early stress:
+# {"execute": "cxl-inject-memory-module-event", "arguments": {"path": "/machine/peripheral/cxl1", "log": "warning", "flags": 0, "type": 0, "health-status": 1, "media-status": 0, "additional-status": 0, "life-used": 75, "temperature": 85, "dirty-shutdown-count": 2, "corrected-volatile-error-count": 120, "corrected-persistent-error-count": 0}}
+#
+# Failure — device actively degrading:
+# {"execute": "cxl-inject-memory-module-event", "arguments": {"path": "/machine/peripheral/cxl1", "log": "failure", "flags": 0, "type": 0, "health-status": 3, "media-status": 1, "additional-status": 0, "life-used": 90, "temperature": 95, "dirty-shutdown-count": 5, "corrected-volatile-error-count": 500, "corrected-persistent-error-count": 10}}
+#
+# Fatal — device at end of life:
+# {"execute": "cxl-inject-memory-module-event", "arguments": {"path": "/machine/peripheral/cxl1", "log": "fatal", "flags": 0, "type": 0, "health-status": 7, "media-status": 3, "additional-status": 0, "life-used": 99, "temperature": 105, "dirty-shutdown-count": 10, "corrected-volatile-error-count": 9999, "corrected-persistent-error-count": 50}}
+#
+# GUEST TERMINAL — observe:
+# cat /proc/interrupts | grep "0e:00"
+# cat /sys/kernel/debug/tracing/trace | grep "cxl_memory_module" | fold -w 200
+#
+# WHAT TO SEE:
+#   Trace shows: life_used=50 device_temp=35 cor_vol_err_cnt=5 (escalating per level)
+#   This is the only event type that exposes temperature data in emulation
+#   health-status bitmap escalates: 0 -> 1 -> 3 -> 7 (more problems flagged)
+
+
+# ERROR 4: POISON
+# Path   : QMP inject -> device poison list -> polled trigger -> kernel trace
+# Impact : Affected memory pages marked bad (offline)
+# Note   : NO interrupt — must manually trigger poison list read
+#          Requires QEMU restart to clear (backing file retains poison)
+#
+#
+# GUEST TERMINAL — setup (tracing must be on before inject):
+# echo 1 > /sys/kernel/debug/tracing/tracing_on
+# echo 1 > /sys/kernel/debug/tracing/events/cxl/enable
+# echo > /sys/kernel/debug/tracing/trace
+#
+# QMP TERMINAL — inject:
+# {"execute": "cxl-inject-poison", "arguments": {"path": "/machine/peripheral/cxl1", "start": 0, "length": 64}}
+#
+# GUEST TERMINAL — trigger and observe (mem1 not mem0):
+# echo 1 > /sys/bus/cxl/devices/mem1/trigger_poison_list
+# cat /sys/kernel/debug/tracing/trace | grep "cxl_poison" | fold -w 200
+# dmesg | grep -i poison | tail -5
+#
+# WHAT TO SEE:
+#   Trace shows: cxl_poison memdev=mem1 dpa=0x0 dpa_length=0x40 source=Internal
+#   No IRQ fires — poison is polled not interrupt-driven
+#
+# CLEAN UP: Restart QEMU to clear poison state
+#   pkill -f qemu-system-x86_64 && sleep 2 && ./start-cxl.sh
+
+
+# ERROR 5: CORRECTABLE AER
+# Path   : PCIe AER registers -> aerdrv IRQ -> kernel trace
+# Impact : Logged and counted — device stays fully online, no link reset
+# Note   : Must clear AER status registers before injection
+#
+#
+# GUEST TERMINAL — clear AER status first:
+# setpci -s 0000:0e:00.0 0x204.l=0xffffffff
+# setpci -s 0000:0e:00.0 0x208.l=0x00000000
+# cat /proc/interrupts | grep -E "24|25|0e:00"
+#
+# QMP TERMINAL — inject:
+# {"execute": "cxl-inject-correctable-errors", "arguments": {"path": "/machine/peripheral/cxl1", "errors": [{"type": "mem-data-ecc"}]}}
+#
+# GUEST TERMINAL — observe:
+# cat /proc/interrupts | grep -E "24|25|0e:00"
+# cat /sys/kernel/debug/tracing/trace | grep "cxl_aer" | fold -w 200
+# dmesg | tail -10
+#
+# WHAT TO SEE:
+#   IRQ 25 (aerdrv) increments by 1
+#   IRQ 38 (event log MSI-X) unchanged — different path
+#   Trace shows: cxl_aer_correctable_error status='Memory Data ECC Error'
+#   dmesg shows AER correctable error message
+#   Device stays online — no link reset
+
+
+# ERROR 6: UNCORRECTABLE FATAL AER
+# Path   : PCIe AER registers -> aerdrv IRQ -> link reset -> recovery
+# Impact : ~51ms device downtime — link reset, device frozen then recovered
+# Note   : Most destructive error. Do NOT stress test. Restart after injection.
+#
+#
+# GUEST TERMINAL — clear AER status first:
+# setpci -s 0000:0e:00.0 0x204.l=0xffffffff
+# setpci -s 0000:0e:00.0 0x208.l=0x00000000
+# cat /proc/interrupts | grep -E "24|25|0e:00"
+# dmesg | tail -3
+#
+# QMP TERMINAL — inject:
+# {"execute": "cxl-inject-uncorrectable-errors", "arguments": {"path": "/machine/peripheral/cxl1", "errors": [{"type": "mem-data-ecc", "header": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]}]}}
+#
+# GUEST TERMINAL — observe immediately:
+# dmesg | tail -15
+# cat /proc/interrupts | grep -E "24|25|0e:00"
+# cat /sys/kernel/debug/tracing/trace | grep "cxl_aer" | fold -w 200
+# cxl list -R -T
+#
+# WHAT TO SEE:
+#   dmesg sequence (full recovery in ~51ms):
+#     AER: Uncorrectable (Fatal) error received
+#     mem0: frozen state error detected, disable CXL.mem
+#     Root Port link has been reset
+#     mem0: restart CXL.mem after slot reset
+#     mem0: error resume successful
+#     device recovery successful
+#   IRQ 25 increments, IRQ 38 unchanged
+#   region0 survives — still committed after recovery
+#
+# CLEAN UP: Restart QEMU before next error type
+#   pkill -f qemu-system-x86_64 && sleep 2 && ./start-cxl.sh
+
+
+# QUICK COMPARISON TABLE
+#
+# Error Type         IRQ   Path              Downtime  Recovery
+# -----------------------------------------------------------------
+# General Media      38    Event Log/MSI-X   0ms       None
+# DRAM               38    Event Log/MSI-X   0ms       None
+# Memory Module      38    Event Log/MSI-X   0ms       None
+# Poison             None  Polled            0ms       Page offline
+# Correctable AER    25    PCIe AER/aerdrv   0ms       None
+# Uncorrectable AER  25    PCIe AER/aerdrv   ~51ms     Link reset + restart
+#
