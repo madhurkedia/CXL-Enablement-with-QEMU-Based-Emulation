@@ -76,13 +76,13 @@ run_phase2() {
     local m0_size="256M" m1_size="256M" m2_size="512M" fmw_size="8G"
     
     if [[ "${memory_config}" == "expanded" ]]; then
-        info "Launching Phase 2 (expanded) — 1 GiB + 1 GiB + 512 MiB endpoints..."
+        info "Launching Phase 2 (expanded) — 1 GiB + 1 GiB + 512 MiB endpoints"
         m0_size="1024M"
         m1_size="1024M"
         m2_size="512M"
         fmw_size="2G"
     else
-        info "Launching Phase 2 — Advanced CXL switch topology (3 endpoints)..."
+        info "Launching Phase 2 — Advanced CXL switch topology (3 endpoints)"
     fi
 
     exec "${QEMU_BIN}" \

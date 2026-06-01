@@ -56,8 +56,8 @@ guest_create_interleaved_region() {
     cxl create-region \
         -m mem0 -m mem1 \
         -d decoder0.0 \
-        --interleave-ways=2 \
-        --interleave-granularity=4096
+        -w 2 \
+        -g 4096 
 
     info "Created Regions"
     cxl list -R
