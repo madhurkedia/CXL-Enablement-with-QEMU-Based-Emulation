@@ -69,15 +69,17 @@ guest_create_two_regions() {
     cxl create-region \
         -m mem0 -m mem1 \
         -d decoder0.0 \
-        --interleave-ways=2 \
-        --interleave-granularity=4096
+        -w 2 \
+        -g 4096 \
+        -s 1G
 
     info "Creating Region B on Switch B (mem2 + mem3 → decoder1.0, 2-way interleave)"
     cxl create-region \
         -m mem2 -m mem3 \
-        -d decoder1.0 \
-        --interleave-ways=2 \
-        --interleave-granularity=4096
+        -d decoder0.0 \
+        -w 2 \
+        -g 4096 \
+        -s 1G
 
     info "Listing all created regions (expect: region0 and region1)"
     cxl list -R

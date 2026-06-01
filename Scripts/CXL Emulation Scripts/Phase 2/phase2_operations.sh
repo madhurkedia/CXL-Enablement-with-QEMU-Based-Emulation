@@ -9,32 +9,32 @@ success() { echo -e "${GREEN}[OK]${NC}    $*"; }
 warn()    { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 
 guest_create_regions_phase2() {
-    info "=== Region creation — Phase 2 (advanced): mem0 on decoder0.0 ==="
+    info "Region creation — Phase 2 (advanced): mem0 on decoder0.0"
     cxl create-region -m mem0 -d decoder0.0
 
-    info "--- Listing created region ---"
+    info "Listing created region"
     cxl list -R
 
-    info "--- Listing full decoder hierarchy after region commit ---"
+    info "Listing full decoder hierarchy after region commit"
     cxl list -D
 }
 
 guest_region_error_cases() {
-    warn "=== Expected failure: duplicate region on same decoder (no space) ==="
+    warn "Expected failure: duplicate region on same decoder (no space)"
     cxl create-region -m mem0 -d decoder0.0 || success "Caught expected No Space error"
 
-    warn "=== Expected failure: cross-port decoder mismatch ==="
+    warn "Expected failure: cross-port decoder mismatch"
     cxl create-region -m mem1 -d decoder0.0 || success "Caught expected Cross-Port Mismatch error"
 }
 
 guest_create_namespace() {
-    info "=== Creating fsdax namespace on region0 ==="
+    info "Creating fsdax namespace on region0"
     ndctl create-namespace --region=region0 || warn "Failed to create namespace"
 
-    info "--- Verifying block device ---"
+    info "Verifying block device"
     ls -l /dev/pmem* || warn "/dev/pmem* not found"
 
-    info "--- Checking for DAX char devices ---"
+    info "Checking for DAX char devices"
     ls /dev/dax* 2>/dev/null || success "/dev/dax*: not present (expected behavior for fsdax mode)"
 }
 
@@ -44,24 +44,23 @@ guest_io_validation() {
         return 1
     fi
 
-    info "=== I/O Validation on /dev/pmem0 ==="
+    info "I/O Validation on /dev/pmem0"
 
-    info "-- Write: zero-fill 10 MiB (measures write path latency) --"
+    info "Write: zero-fill 10 MiB (measures write path latency)"
     dd if=/dev/zero of=/dev/pmem0 bs=1M count=10 oflag=direct
 
-    info "-- Write: random data 10 MiB (measures entropy + throughput) --"
+    info "Write: random data 10 MiB (measures entropy + throughput)"
     dd if=/dev/urandom of=/dev/pmem0 bs=1M count=10 oflag=direct
 
-    info "-- Read: consume 10 MiB to /dev/null (measures read throughput) --"
+    info "Read: consume 10 MiB to /dev/null (measures read throughput)"
     dd if=/dev/pmem0 of=/dev/null bs=1M count=10
 
-    info "--- Verbose namespace list (confirms NUMA node assignment) ---"
+    info "Verbose namespace list (confirms NUMA node assignment)"
     ndctl list -v
 }
 
 # Execution Sequence
-
-info "Starting Phase 2 Advanced Region & Namespace Operations..."
+info "Starting Phase 2 Advanced Region & Namespace Operations"
 
 guest_create_regions_phase2
 guest_region_error_cases
