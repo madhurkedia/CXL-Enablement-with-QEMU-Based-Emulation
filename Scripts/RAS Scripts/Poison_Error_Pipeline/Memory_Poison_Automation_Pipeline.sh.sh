@@ -1,4 +1,8 @@
 
+# INFO: This automation pipeline is under active development and evolving.
+# INFO: Current implementation is experimental and subject to refinement in future iterations.
+
+
 #  CXL Memory Fault Injection Framework
 #  Usage:  chmod +x cxl_fault_injector.sh && sudo ./cxl_fault_injector.sh
 #          or with options:
