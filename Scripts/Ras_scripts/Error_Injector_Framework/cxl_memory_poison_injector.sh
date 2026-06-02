@@ -53,7 +53,7 @@ ok "Directory structure created"
 cat > "$INSTALL_DIR/utils/checks.py" << 'PYEOF'
 import os, sys, subprocess, platform
 
-GREEN  = "\033[92m"; YELLOW = "\033[93m"; RED = "\033[91m"; RESET = "\033[0m"
+GREEN  = "\033[92m"; YELLOW = "\033[93m"; RED = "\033[91m"; BOLD = "\033[1m"; RESET = "\033[0m"
 def ok(msg):   print(f"  {GREEN}[pass]{RESET} {msg}")
 def warn(msg): print(f"  {YELLOW}[warn]{RESET} {msg}")
 def fail(msg): print(f"  {RED}[fail]{RESET} {msg}")
@@ -116,7 +116,7 @@ def determine_mode(caps):
     else:                          mode, desc = "MODE 1", "qemu lab or wsl"
     info(f"{mode} -- {desc}"); return mode
 
-def run_all_checks():
+def all_checks():
     print("=" * 45); print("  cxl fault injector -- environment checks"); print("=" * 45)
     out = {}
     out["root"] = check_root()
@@ -137,18 +137,14 @@ def run_all_checks():
     return out
 
 if __name__ == "__main__":
-    run_all_checks()
+    all_checks()
 PYEOF
 
 # discovery/discover.py 
 cat > "$INSTALL_DIR/discovery/discover.py" << 'PYEOF'
 import os, sys, json, subprocess
 
-GREEN  = "\033[92m"; YELLOW = "\033[93m"; RED = "\033[91m"; RESET = "\033[0m"
-def ok(msg):   print(f"  {GREEN}[pass]{RESET} {msg}")
-def warn(msg): print(f"  {YELLOW}[warn]{RESET} {msg}")
-def fail(msg): print(f"  {RED}[fail]{RESET} {msg}")
-def info(msg): print(f"  [info] {msg}")
+from utils.checks import ok, warn, fail, info
 
 SYSFS = "/sys/bus/cxl/devices"
 
@@ -157,44 +153,59 @@ def list_devices_via_cli():
     try:
         r = subprocess.run(["cxl", "list", "--memdevs"], capture_output=True, text=True, timeout=10)
         if r.returncode != 0 or not r.stdout.strip():
-            warn("cxl-cli returned no devices"); return []
+            warn("cxl-cli returned no devices")
+            return []
         data = json.loads(r.stdout.strip())
-        if isinstance(data, dict): data = [data]
-        ok(f"cxl-cli found {len(data)} device(s)"); return data
+        if isinstance(data, dict):
+            data = [data]
+        ok(f"cxl-cli found {len(data)} device(s)")
+        return data
     except (FileNotFoundError, json.JSONDecodeError):
-        warn("cxl-cli unavailable or returned invalid output"); return []
+        warn("cxl-cli unavailable or returned invalid output")
+        return []
 
 def scan_sysfs():
     print("\n-- scanning sysfs for cxl devices")
     if not os.path.exists(SYSFS):
         warn(f"sysfs path not found: {SYSFS}")
-        info("expected in wsl2 or systems without cxl hardware"); return []
+        info("expected in wsl2 or systems without cxl hardware")
+        return []
     devs = sorted(e for e in os.listdir(SYSFS) if e.startswith("mem"))
-    if devs: ok(f"sysfs found: {', '.join(devs)}")
-    else:     warn("no mem* devices in sysfs")
+    if devs:
+        ok(f"sysfs found: {', '.join(devs)}")
+    else:
+        warn("no mem* devices in sysfs")
     return devs
 
 def get_dpa_range(name):
     size_path = f"{SYSFS}/{name}/ram/size"
     if not os.path.exists(size_path):
         warn(f"no ram/size for {name} -- will use simulated 1gb range")
-        size = 1 * 1024 ** 3; return "0x0", hex(size), size
+        size = 1 * 1024 ** 3
+        return "0x0", hex(size), size
     try:
-        raw  = open(size_path).read().strip()
+        with open(size_path) as fh:
+            raw = fh.read().strip()
         size = int(raw, 16) if raw.startswith("0x") else int(raw)
         info(f"{name} dpa range: 0x0 to {hex(size)} ({size // (1024**3)} gb)")
         return "0x0", hex(size), size
     except ValueError:
         warn(f"could not parse size for {name}")
-        size = 1 * 1024 ** 3; return "0x0", hex(size), size
+        size = 1 * 1024 ** 3
+        return "0x0", hex(size), size
 
 def get_numa_node(name):
     path = f"{SYSFS}/{name}/numa_node"
     if os.path.exists(path):
         try:
-            node = int(open(path).read().strip()); info(f"{name} numa node: {node}"); return node
-        except ValueError: pass
-    info(f"{name} numa node: unknown"); return None
+            with open(path) as fh:
+                node = int(fh.read().strip())
+            info(f"{name} numa node: {node}")
+            return node
+        except ValueError:
+            pass
+    info(f"{name} numa node: unknown")
+    return None
 
 def check_existing_poison(name):
     print(f"\n-- checking pre-existing poison on {name}")
@@ -202,24 +213,34 @@ def check_existing_poison(name):
         r = subprocess.run(["cxl", "list", "--poison", name], capture_output=True, text=True, timeout=10)
         raw = r.stdout.strip()
         if not raw or raw == "[]":
-            ok(f"{name} poison list is clean"); return [], 0
+            ok(f"{name} poison list is clean")
+            return [], 0
         data = json.loads(raw)
-        if isinstance(data, dict): data = [data]
-        warn(f"{name} has {len(data)} pre-existing poison record(s)"); return data, len(data)
-    except Exception:
-        info(f"could not read poison list for {name} (expected in wsl2)"); return [], 0
+        if isinstance(data, dict):
+            data = [data]
+        warn(f"{name} has {len(data)} pre-existing poison record(s)")
+        return data, len(data)
+    except Exception as e:
+        info(f"could not read poison list for {name} (expected in wsl2). Error details: {e}")
+        return [], 0
 
 def check_capacity(name, current):
-    path = f"{SYSFS}/{name}/poison_max"; capacity = 256
+    path = f"{SYSFS}/{name}/poison_max"
+    capacity = 256
     if os.path.exists(path):
-        try: capacity = int(open(path).read().strip())
-        except ValueError: pass
+        try:
+            with open(path) as fh:
+                capacity = int(fh.read().strip())
+        except ValueError:
+            pass
     else:
         info(f"{name} poison_max not found, assuming {capacity}")
-    pct  = (current / capacity * 100) if capacity else 0
+    pct = (current / capacity * 100) if capacity else 0
     risk = "HIGH" if pct > 80 else "LOW"
-    if risk == "HIGH": warn(f"{name} poison list {pct:.0f}% full")
-    else:              info(f"{name} poison list: {current}/{capacity} ({pct:.0f}%)")
+    if risk == "HIGH":
+        warn(f"{name} poison list {pct:.0f}% full")
+    else:
+        info(f"{name} poison list: {current}/{capacity} ({pct:.0f}%)")
     return capacity, risk
 
 def build_topology(cli_devices, sysfs_devices):
@@ -231,8 +252,11 @@ def build_topology(cli_devices, sysfs_devices):
     all_names = sorted(cli_names | set(sysfs_devices))
     if not all_names:
         warn("no real cxl devices found anywhere")
-        info("generating simulated mem0 for development"); all_names = ["mem0"]
-    devices = []; numa_map = {}; total = 0
+        info("generating simulated mem0 for development")
+        all_names = ["mem0"]
+    devices = []
+    numa_map = {}
+    total = 0
     for name in all_names:
         dpa_start, dpa_end, size = get_dpa_range(name)
         numa = get_numa_node(name)
@@ -258,66 +282,74 @@ def build_topology(cli_devices, sysfs_devices):
     ok(f"topology ready: {len(devices)} device(s), {topology['total_cxl_memory_gb']} gb total")
     return topology
 
-def run_discovery():
-    print("=" * 45); print("  cxl fault injector -- device discovery"); print("=" * 45)
+def discovery():
+    print("=" * 45)
+    print("  cxl fault injector -- device discovery")
+    print("=" * 45)
     cli  = list_devices_via_cli()
     sysf = scan_sysfs()
     topo = build_topology(cli, sysf)
-    print("\n" + "=" * 45); print("  discovery complete"); print("=" * 45)
-    print(json.dumps(topo, indent=2)); return topo
+    print("\n" + "=" * 45)
+    print("  discovery complete")
+    print("=" * 45)
+    print(json.dumps(topo, indent=2))
+    return topo
 
 if __name__ == "__main__":
-    run_discovery()
+    discovery()
 PYEOF
 
 # strategy/strategy.py 
 cat > "$INSTALL_DIR/strategy/strategy.py" << 'PYEOF'
 import os, sys, random
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, BASE_DIR)
-
-GREEN  = "\033[92m"; YELLOW = "\033[93m"; RED = "\033[91m"; RESET = "\033[0m"
-def ok(msg):   print(f"  {GREEN}[pass]{RESET} {msg}")
-def warn(msg): print(f"  {YELLOW}[warn]{RESET} {msg}")
-def fail(msg): print(f"  {RED}[fail]{RESET} {msg}")
-def info(msg): print(f"  [info] {msg}")
+from utils.checks import ok, warn, fail, info
 
 CACHELINE = 64
 
-def align(addr): return (addr // CACHELINE) * CACHELINE
+def align(addr):
+    return (addr // CACHELINE) * CACHELINE
 
 def excluded_addresses(device):
     skip = {0x0}
     for entry in device.get("poison_list", []):
-        try: skip.add(int(entry.get("dpa", "0x0"), 16))
-        except (ValueError, AttributeError): pass
+        try:
+            skip.add(int(entry.get("dpa", "0x0"), 16))
+        except (ValueError, AttributeError):
+            pass
     return skip
 
 def random_unused(device):
     info(f"strategy random_unused on {device['name']}")
-    start = int(device["dpa_start"], 16); end = int(device["dpa_end"], 16)
-    skip  = excluded_addresses(device); pool = []
-    addr  = align(start + CACHELINE)
+    start = int(device["dpa_start"], 16)
+    end = int(device["dpa_end"], 16)
+    skip = excluded_addresses(device)
+    pool = []
+    addr = align(start + CACHELINE)
     while addr < end and len(pool) < 100_000:
-        if addr not in skip: pool.append(addr)
+        if addr not in skip:
+            pool.append(addr)
         addr += CACHELINE
     if not pool:
-        fail(f"no valid addresses on {device['name']}"); return []
+        fail(f"no valid addresses on {device['name']}")
+        return []
     chosen = random.choice(pool)
     ok(f"selected dpa: {hex(chosen)} on {device['name']}")
     return [{"device": device["name"], "dpa": hex(chosen), "strategy": "random_unused"}]
 
 def sweep(device, limit=None):
     info(f"strategy sweep on {device['name']}" + (f" (limit {limit})" if limit else ""))
-    start = int(device["dpa_start"], 16); end = int(device["dpa_end"], 16)
-    skip  = excluded_addresses(device); targets = []
-    addr  = align(start + CACHELINE)
+    start = int(device["dpa_start"], 16)
+    end = int(device["dpa_end"], 16)
+    skip = excluded_addresses(device)
+    targets = []
+    addr = align(start + CACHELINE)
     while addr < end:
         if addr not in skip:
             targets.append({"device": device["name"], "dpa": hex(addr), "strategy": "sweep"})
         addr += CACHELINE
-        if limit and len(targets) >= limit: break
+        if limit and len(targets) >= limit:
+            break
     ok(f"sweep generated {len(targets)} target(s) on {device['name']}")
     return targets
 
@@ -326,23 +358,30 @@ def numa_targeted(topology, numa_node):
     node_key = str(numa_node)
     if node_key not in topology.get("numa_map", {}):
         fail(f"numa node {numa_node} not in topology")
-        info(f"available nodes: {list(topology['numa_map'].keys())}"); return []
-    dev_map = {d["name"]: d for d in topology["devices"]}; targets = []
+        info(f"available nodes: {list(topology['numa_map'].keys())}")
+        return []
+    dev_map = {d["name"]: d for d in topology["devices"]}
+    targets = []
     for name in topology["numa_map"][node_key]:
         device = dev_map.get(name)
         if device:
             result = random_unused(device)
             for t in result:
-                t["strategy"] = "numa_targeted"; t["numa_node"] = numa_node
+                t["strategy"] = "numa_targeted"
+                t["numa_node"] = numa_node
             targets.extend(result)
-    ok(f"numa strategy generated {len(targets)} target(s)"); return targets
+    ok(f"numa strategy generated {len(targets)} target(s)")
+    return targets
 
 def interleave_edge(topology):
-    info("strategy interleave_edge"); targets = []
+    info("strategy interleave_edge")
+    targets = []
     for device in topology["devices"]:
-        start = int(device["dpa_start"], 16); end = int(device["dpa_end"], 16)
-        skip  = excluded_addresses(device)
-        near_start = align(start + CACHELINE); near_end = align(end - CACHELINE)
+        start = int(device["dpa_start"], 16)
+        end = int(device["dpa_end"], 16)
+        skip = excluded_addresses(device)
+        near_start = align(start + CACHELINE)
+        near_end = align(end - CACHELINE)
         if near_start not in skip and near_start < end:
             targets.append({"device": device["name"], "dpa": hex(near_start),
                             "strategy": "interleave_edge", "position": "start_boundary"})
@@ -350,52 +389,56 @@ def interleave_edge(topology):
             targets.append({"device": device["name"], "dpa": hex(near_end),
                             "strategy": "interleave_edge", "position": "end_boundary"})
         info(f"{device['name']} boundaries: start={hex(near_start)}, end={hex(near_end)}")
-    ok(f"interleave edge generated {len(targets)} target(s)"); return targets
+    ok(f"interleave edge generated {len(targets)} target(s)")
+    return targets
 
-def run_strategy(topology, strategy="random", device_name=None,
-                 numa_node=0, limit=None, dry_run=False):
-    print("=" * 45); print("  cxl fault injector -- strategy engine"); print("=" * 45)
+def strategy(topology, strategy="random", device_name=None,
+             numa_node=0, limit=None, dry_run=False):
+    print("=" * 45)
+    print("  cxl fault injector -- strategy engine")
+    print("=" * 45)
     devices = topology["devices"]
     if device_name and device_name != "all":
         devices = [d for d in devices if d["name"] == device_name]
         if not devices:
-            fail(f"device '{device_name}' not in topology"); return []
+            fail(f"device '{device_name}' not in topology")
+            return []
         topology = dict(topology, devices=devices)
-    if   strategy == "random":     targets = [t for d in devices for t in random_unused(d)]
-    elif strategy == "sweep":      targets = [t for d in devices for t in sweep(d, limit=limit)]
-    elif strategy == "numa":       targets = numa_targeted(topology, numa_node)
-    elif strategy == "interleave": targets = interleave_edge(topology)
+    if strategy == "random":
+        targets = [t for d in devices for t in random_unused(d)]
+    elif strategy == "sweep":
+        targets = [t for d in devices for t in sweep(d, limit=limit)]
+    elif strategy == "numa":
+        targets = numa_targeted(topology, numa_node)
+    elif strategy == "interleave":
+        targets = interleave_edge(topology)
     else:
-        fail(f"unknown strategy '{strategy}'"); return []
+        fail(f"unknown strategy '{strategy}'")
+        return []
     if dry_run:
         print("\n  -- dry run, no injection will happen --")
         for t in targets:
             pos = f" [{t.get('position', '')}]" if t.get("position") else ""
             print(f"  would inject: {t['device']} @ {t['dpa']}{pos}")
-        print(f"  total: {len(targets)} target(s)"); return targets
-    print(f"\n  targets planned: {len(targets)}"); return targets
+        print(f"  total: {len(targets)} target(s)")
+        return targets
+    print(f"\n  targets planned: {len(targets)}")
+    return targets
 
 if __name__ == "__main__":
-    from discovery.discover import run_discovery
-    topo = run_discovery()
+    from discovery.discover import discovery
+    topo = discovery()
     print("\n-- testing all strategies in dry-run mode --\n")
     for s in ["random", "sweep", "numa", "interleave"]:
         print(f"\n  strategy: {s}")
-        run_strategy(topo, strategy=s, limit=3, dry_run=True, numa_node=0)
+        strategy(topo, strategy=s, limit=3, dry_run=True, numa_node=0)
 PYEOF
 
 # injection/inject.py 
 cat > "$INSTALL_DIR/injection/inject.py" << 'PYEOF'
 import os, sys, subprocess, time
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, BASE_DIR)
-
-GREEN  = "\033[92m"; YELLOW = "\033[93m"; RED = "\033[91m"; RESET = "\033[0m"
-def ok(msg):   print(f"  {GREEN}[pass]{RESET} {msg}")
-def warn(msg): print(f"  {YELLOW}[warn]{RESET} {msg}")
-def fail(msg): print(f"  {RED}[fail]{RESET} {msg}")
-def info(msg): print(f"  [info] {msg}")
+from utils.checks import ok, warn, fail, info
 
 SYSFS       = "/sys/bus/cxl/devices"
 DEBUG_SYSFS = "/sys/kernel/debug/cxl"
@@ -403,13 +446,17 @@ DEBUG_SYSFS = "/sys/kernel/debug/cxl"
 def pre_check(device):
     info(f"pre-injection check on {device['name']}")
     if not device.get("online", False):
-        fail(f"{device['name']} is offline"); return False
-    count = device.get("poison_list_count", 0); capacity = device.get("poison_list_capacity", 256)
+        fail(f"{device['name']} is offline")
+        return False
+    count = device.get("poison_list_count", 0)
+    capacity = device.get("poison_list_capacity", 256)
     if count >= capacity:
-        fail(f"{device['name']} poison list full ({count}/{capacity})"); return False
+        fail(f"{device['name']} poison list full ({count}/{capacity})")
+        return False
     if device.get("risk_flag") == "HIGH":
         warn(f"{device['name']} poison list over 80% full, continuing")
-    ok("pre-check passed"); return True
+    ok("pre-check passed")
+    return True
 
 def inject_cli(device_name, dpa):
     info(f"injecting via cxl-cli: {device_name} @ {dpa}")
@@ -417,12 +464,16 @@ def inject_cli(device_name, dpa):
         r = subprocess.run(["cxl", "inject-poison", device_name, "--dpa", str(dpa)],
                            capture_output=True, text=True, timeout=10)
         if r.returncode == 0:
-            ok("cxl-cli injection accepted"); return True, "cxl-cli"
-        warn(f"cxl-cli injection failed: {r.stderr.strip()}"); return False, "cxl-cli"
+            ok("cxl-cli injection accepted")
+            return True, "cxl-cli"
+        warn(f"cxl-cli injection failed: {r.stderr.strip()}")
+        return False, "cxl-cli"
     except FileNotFoundError:
-        warn("cxl-cli not found"); return False, "cxl-cli"
+        warn("cxl-cli not found")
+        return False, "cxl-cli"
     except subprocess.TimeoutExpired:
-        warn("cxl-cli injection timed out"); return False, "cxl-cli"
+        warn("cxl-cli injection timed out")
+        return False, "cxl-cli"
 
 def inject_sysfs(device_name, dpa):
     info(f"injecting via sysfs: {device_name} @ {dpa}")
@@ -430,31 +481,45 @@ def inject_sysfs(device_name, dpa):
     if not os.path.exists(path):
         info(f"sysfs inject path not found: {path}")
         info("expected on wsl2 or systems without real cxl hardware")
-        info(f"[simulated] injection recorded @ {dpa}"); return True, "sysfs-simulated"
+        info(f"[simulated] injection recorded @ {dpa}")
+        return True, "sysfs-simulated"
     try:
-        open(path, "w").write(str(dpa)); ok("sysfs injection accepted"); return True, "sysfs"
+        with open(path, "w") as fh:
+            fh.write(str(dpa) + "\n")
+        ok("sysfs injection accepted")
+        return True, "sysfs"
     except PermissionError:
-        fail(f"permission denied: {path}"); return False, "sysfs"
+        fail(f"permission denied: {path}")
+        return False, "sysfs"
     except OSError as e:
-        fail(f"sysfs write error: {e}"); return False, "sysfs"
+        fail(f"sysfs write error: {e}")
+        return False, "sysfs"
 
 def confirm_injection(device_name, dpa, simulated=False):
     info(f"confirming injection on {device_name} @ {dpa}")
     if simulated:
-        info("[simulated] skipping confirmation"); return True
+        info("[simulated] skipping confirmation")
+        return True
     trigger = f"{SYSFS}/{device_name}/trigger_poison_list"
     if os.path.exists(trigger):
-        try: open(trigger, "w").write("1")
-        except OSError: pass
+        try:
+            # Force hardware to audit the poison list before we read it
+            with open(trigger, "w") as fh:
+                fh.write("1\n")
+        except OSError:
+            pass
     time.sleep(1.0)
     try:
         r = subprocess.run(["cxl", "list", "--poison", device_name],
                            capture_output=True, text=True, timeout=10)
         if dpa in r.stdout:
-            ok("injection confirmed in poison list"); return True
-        warn(f"{dpa} not in poison list yet"); return False
-    except Exception:
-        warn("could not verify injection"); return False
+            ok("injection confirmed in poison list")
+            return True
+        warn(f"{dpa} not in poison list yet")
+        return False
+    except Exception as e:
+        warn(f"could not verify injection. Error details: {e}")
+        return False
 
 def clear_cli(device_name, dpa):
     info(f"clearing via cxl-cli: {device_name} @ {dpa}")
@@ -462,42 +527,59 @@ def clear_cli(device_name, dpa):
         r = subprocess.run(["cxl", "clear-poison", device_name, "--dpa", str(dpa)],
                            capture_output=True, text=True, timeout=10)
         if r.returncode == 0:
-            ok("cxl-cli clear accepted"); return True, "cxl-cli"
-        warn(f"cxl-cli clear failed: {r.stderr.strip()}"); return False, "cxl-cli"
+            ok("cxl-cli clear accepted")
+            return True, "cxl-cli"
+        warn(f"cxl-cli clear failed: {r.stderr.strip()}")
+        return False, "cxl-cli"
     except FileNotFoundError:
-        warn("cxl-cli not found for clear"); return False, "cxl-cli"
+        warn("cxl-cli not found for clear")
+        return False, "cxl-cli"
     except subprocess.TimeoutExpired:
-        warn("cxl-cli clear timed out"); return False, "cxl-cli"
+        warn("cxl-cli clear timed out")
+        return False, "cxl-cli"
 
 def clear_sysfs(device_name, dpa):
     info(f"clearing via sysfs: {device_name} @ {dpa}")
     path = f"{DEBUG_SYSFS}/{device_name}/clear_poison"
     if not os.path.exists(path):
-        info("[simulated] clear recorded"); return True, "sysfs-simulated"
+        info("[simulated] clear recorded")
+        return True, "sysfs-simulated"
     try:
-        open(path, "w").write(str(dpa)); ok("sysfs clear accepted"); return True, "sysfs"
+        with open(path, "w") as fh:
+            fh.write(str(dpa) + "\n")
+        ok("sysfs clear accepted")
+        return True, "sysfs"
     except OSError as e:
-        fail(f"sysfs clear error: {e}"); return False, "sysfs"
+        fail(f"sysfs clear error: {e}")
+        return False, "sysfs"
 
 def verify_clear(device_name, dpa, simulated=False):
     info(f"verifying clear on {device_name} @ {dpa}")
     if simulated:
-        info("[simulated] skipping verify"); return True
+        info("[simulated] skipping verify")
+        return True
     trigger = f"{SYSFS}/{device_name}/trigger_poison_list"
     if os.path.exists(trigger):
-        try: open(trigger, "w").write("1")
-        except OSError: pass
+        try:
+            # Force hardware to audit the poison list to ensure clear was successful
+            with open(trigger, "w") as fh:
+                fh.write("1\n")
+        except OSError:
+            pass
     time.sleep(1.0)
     try:
         r = subprocess.run(["cxl", "list", "--poison", device_name],
                            capture_output=True, text=True, timeout=10)
         if dpa not in r.stdout:
-            ok("poison cleared, device is clean"); return True
-        fail(f"{dpa} still in poison list after clear"); return False
-    except Exception:
-        warn("could not verify clear"); return False
+            ok("poison cleared, device is clean")
+            return True
+        fail(f"{dpa} still in poison list after clear")
+        return False
+    except Exception as e:
+        warn(f"could not verify clear. Error details: {e}")
+        return False
 
-def run_injection_cycle(device, dpa):
+def injection(device, dpa):
     result = {
         "device": device["name"], "dpa": dpa,
         "pre_check": False, "injected": False, "injection_method": None,
@@ -507,59 +589,63 @@ def run_injection_cycle(device, dpa):
         "simulated": False, "overall": "FAIL"
     }
     print(f"\n  target: {device['name']} @ {dpa}")
-    if not pre_check(device): return result
+    if not pre_check(device):
+        return result
     result["pre_check"] = True
     success, method = inject_cli(device["name"], dpa)
-    if not success: success, method = inject_sysfs(device["name"], dpa)
     if not success:
-        fail("all injection methods failed"); return result
-    result["injected"]         = True
+        success, method = inject_sysfs(device["name"], dpa)
+    if not success:
+        fail("all injection methods failed")
+        return result
+    result["injected"] = True
     result["injection_method"] = method
-    result["injection_time"]   = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-    simulated = "simulated" in method; result["simulated"] = simulated
+    result["injection_time"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    simulated = "simulated" in method
+    result["simulated"] = simulated
     result["injection_confirmed"] = confirm_injection(device["name"], dpa, simulated=simulated)
     success, method = clear_cli(device["name"], dpa)
-    if not success: success, method = clear_sysfs(device["name"], dpa)
-    result["cleared"]      = success
+    if not success:
+        success, method = clear_sysfs(device["name"], dpa)
+    result["cleared"] = success
     result["clear_method"] = method
-    result["clear_time"]   = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    result["clear_time"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     result["verified_clean"] = verify_clear(device["name"], dpa, simulated=simulated)
     if result["injected"] and result["cleared"]:
-        result["overall"] = "PASS"; ok("cycle complete -- pass")
+        result["overall"] = "PASS"
+        ok("cycle complete -- pass")
     else:
         fail("cycle incomplete -- fail")
     return result
 
 if __name__ == "__main__":
     import json
-    from discovery.discover import run_discovery
-    from strategy.strategy  import run_strategy
-    print("=" * 45); print("  cxl fault injector -- injection test"); print("=" * 45)
-    topo    = run_discovery()
-    targets = run_strategy(topo, strategy="random")
+    from discovery.discover import discovery
+    from strategy.strategy  import strategy
+    print("=" * 45)
+    print("  cxl fault injector -- injection test")
+    print("=" * 45)
+    topo = discovery()
+    targets = strategy(topo, strategy="random")
     for t in targets:
         device = next(d for d in topo["devices"] if d["name"] == t["device"])
-        result = run_injection_cycle(device, t["dpa"])
-        print("\n-- injection result --"); print(json.dumps(result, indent=2))
+        result = injection(device, t["dpa"])
+        print("\n-- injection result --")
+        print(json.dumps(result, indent=2))
 PYEOF
 
 # detection/detect.py 
 cat > "$INSTALL_DIR/detection/detect.py" << 'PYEOF'
 import os, sys, subprocess, time, json
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, BASE_DIR)
-
-GREEN  = "\033[92m"; YELLOW = "\033[93m"; RED = "\033[91m"; RESET = "\033[0m"
-def ok(msg):   print(f"  {GREEN}[pass]{RESET} {msg}")
-def warn(msg): print(f"  {YELLOW}[warn]{RESET} {msg}")
-def fail(msg): print(f"  {RED}[fail]{RESET} {msg}")
-def info(msg): print(f"  [info] {msg}")
+from utils.checks import ok, warn, fail, info
 
 SYSFS = "/sys/bus/cxl/devices"
-MCE   = "/sys/bus/machinecheck"
+MCE = "/sys/bus/machinecheck"
 
 def path3_check(device_name, dpa, timeout=2):
+    # CXL 2.0/3.0 spec defines event records for poison injection.
+    # We poll the event_log sysfs node to verify if the hardware raised an event.
     info(f"path 3: waiting for event interrupt (timeout {timeout}s)")
     event_path = f"{SYSFS}/{device_name}/event_log"
     if not os.path.exists(event_path):
@@ -569,12 +655,15 @@ def path3_check(device_name, dpa, timeout=2):
     start = time.time()
     while (time.time() - start) < timeout:
         try:
-            if dpa in open(event_path).read():
+            with open(event_path) as fh:
+                content = fh.read()
+            if dpa in content:
                 ms = int((time.time() - start) * 1000)
                 ok(f"path 3: event fired, {dpa} detected ({ms}ms)")
                 return {"path": "path3_event_interrupt", "result": "HIT",
                         "dpa_found": dpa, "latency_ms": ms}
-        except OSError: pass
+        except OSError:
+            pass
         time.sleep(0.05)
     warn(f"path 3: no event within {timeout}s")
     return {"path": "path3_event_interrupt", "result": "MISS",
@@ -588,13 +677,22 @@ def path1_check(device_name, dpa, simulated=False):
                 "dpa_found": dpa, "latency_ms": 0, "simulated": True}
     trigger = f"{SYSFS}/{device_name}/trigger_poison_list"
     if os.path.exists(trigger):
-        try: open(trigger, "w").write("1"); info("path 1: triggered hardware audit")
-        except OSError as e: warn(f"path 1: could not trigger audit: {e}")
-    time.sleep(0.3); start = time.time()
+        try:
+            # According to the CXL spec, reading the poison list sysfs file 
+            # might return cached data. We must write to 'trigger_poison_list' 
+            # to force the hardware to audit the memory and update the cache.
+            with open(trigger, "w") as fh:
+                fh.write("1\n")
+            info("path 1: triggered hardware audit")
+        except OSError as e:
+            warn(f"path 1: could not trigger audit: {e}")
+    time.sleep(0.3)
+    start = time.time()
     try:
-        r   = subprocess.run(["cxl", "list", "--poison", device_name],
-                             capture_output=True, text=True, timeout=10)
-        ms  = int((time.time() - start) * 1000); raw = r.stdout.strip()
+        r = subprocess.run(["cxl", "list", "--poison", device_name],
+                           capture_output=True, text=True, timeout=10)
+        ms = int((time.time() - start) * 1000)
+        raw = r.stdout.strip()
         if not raw or raw == "[]":
             warn(f"path 1: poison list empty, {dpa} not found")
             return {"path": "path1_mailbox_poll", "result": "MISS",
@@ -616,6 +714,9 @@ def path1_check(device_name, dpa, simulated=False):
                 "dpa_found": None, "latency_ms": None, "simulated": False}
 
 def path2_check(caps):
+    # MCEs are triggered by the CPU when it consumes poisoned memory.
+    # We check /sys/bus/machinecheck to ensure the hardware intercepted 
+    # the fault rather than crashing the system entirely.
     if not caps.get("mce_available"):
         info("path 2: mce not available on this system")
         return {"path": "path2_mce", "result": "NOT_AVAILABLE", "fired": False, "address": None}
@@ -627,32 +728,58 @@ def path2_check(caps):
         status_path = f"{MCE}/{entry}/status"
         if os.path.exists(status_path):
             try:
-                status = open(status_path).read().strip()
+                with open(status_path) as fh:
+                    status = fh.read().strip()
                 if status and status not in ("0x0", "0"):
                     warn(f"path 2: mce fired -- {entry} status={status}")
                     return {"path": "path2_mce", "result": "FIRED",
                             "fired": True, "address": status}
-            except OSError: pass
+            except OSError:
+                pass
     ok("path 2: mce silent -- poison was not accessed (good)")
     return {"path": "path2_mce", "result": "SILENT", "fired": False, "address": None}
 
 def cross_verify(p1, p2, p3):
     info("cross-verifying detection paths")
-    r1 = p1.get("result"); r2 = p2.get("result"); r3 = p3.get("result")
+    r1 = p1.get("result")
+    r2 = p2.get("result")
+    r3 = p3.get("result")
     mce_flag = "CRIT_MCE_FIRED" if r2 == "FIRED" else None
-    if mce_flag: warn("critical: mce fired -- poison was accessed before recovery")
-    if   r3 == "HIT"           and r1 == "HIT":    verdict = "PERFECT";          ok("all paths agree -- hardware tracking correct")
-    elif r3 == "HIT"           and r1 == "MISS":   verdict = "FIRMWARE_BUG";     fail("bug: event interrupt fired but poison list not updated")
-    elif r3 == "MISS"          and r1 == "HIT":    verdict = "WARN_PATH3_MISS";  warn("event interrupt did not fire but path 1 caught it")
-    elif r3 == "NOT_AVAILABLE" and r1 == "HIT":    verdict = "PASS";             ok("path 3 not available -- path 1 confirmed detection")
-    elif r3 == "NOT_AVAILABLE" and r1 in ("MISS", "ERROR", "TIMEOUT"):
-        verdict = "FAIL_PATH1_MISS"; fail("critical: path 1 poll also failed to detect poison")
-    else:
-        verdict = "INCONCLUSIVE"; warn(f"inconclusive -- p1:{r1} p2:{r2} p3:{r3}")
-    return {"path1": r1, "path2": r2, "path3": r3, "verdict": verdict,
-            "mce_flag": mce_flag, "cross_verify": verdict in ("PERFECT", "PASS", "WARN_PATH3_MISS")}
+    if mce_flag:
+        warn("critical: mce fired -- poison was accessed before recovery")
 
-def run_detection(device_name, dpa, caps, simulated=False):
+    # both event interrupt and mailbox agree
+    if r3 == "HIT" and r1 == "HIT":
+        verdict = "PERFECT"
+        ok("all paths agree -- hardware tracking correct")
+    # event fired but mailbox missed it -- probably a fw bug
+    elif r3 == "HIT" and r1 == "MISS":
+        verdict = "FIRMWARE_BUG"
+        fail("bug: event interrupt fired but poison list not updated")
+    # mailbox caught it but event interrupt didn't fire
+    elif r3 == "MISS" and r1 == "HIT":
+        verdict = "WARN_PATH3_MISS"
+        warn("event interrupt did not fire but path 1 caught it")
+    # no event interrupt support, but mailbox confirmed
+    elif r3 == "NOT_AVAILABLE" and r1 == "HIT":
+        verdict = "PASS"
+        ok("path 3 not available -- path 1 confirmed detection")
+    # no event interrupt and mailbox also failed
+    elif r3 == "NOT_AVAILABLE" and r1 in ("MISS", "ERROR", "TIMEOUT"):
+        verdict = "FAIL_PATH1_MISS"
+        fail("critical: path 1 poll also failed to detect poison")
+    else:
+        verdict = "INCONCLUSIVE"
+        warn(f"inconclusive -- p1:{r1} p2:{r2} p3:{r3}")
+
+    passed = verdict in ("PERFECT", "PASS", "WARN_PATH3_MISS")
+    return {
+        "path1": r1, "path2": r2, "path3": r3,
+        "verdict": verdict, "mce_flag": mce_flag,
+        "cross_verify": passed
+    }
+
+def detection(device_name, dpa, caps, simulated=False):
     print(f"\n  detection: {device_name} @ {dpa}")
     t_start = time.time()
     p3 = path3_check(device_name, dpa)
@@ -666,88 +793,128 @@ def run_detection(device_name, dpa, caps, simulated=False):
     }
 
 if __name__ == "__main__":
-    from utils.checks       import run_all_checks
-    from discovery.discover import run_discovery
-    from strategy.strategy  import run_strategy
-    from injection.inject   import run_injection_cycle
-    print("=" * 45); print("  cxl fault injector -- detection test"); print("=" * 45)
-    checks  = run_all_checks(); caps = checks["detection_capabilities"]
-    topo    = run_discovery()
-    targets = run_strategy(topo, strategy="random")
+    from utils.checks       import all_checks
+    from discovery.discover import discovery
+    from strategy.strategy  import strategy
+    from injection.inject   import injection
+    print("=" * 45)
+    print("  cxl fault injector -- detection test")
+    print("=" * 45)
+    checks = all_checks()
+    caps = checks["detection_capabilities"]
+    topo = discovery()
+    targets = strategy(topo, strategy="random")
     for t in targets:
         device = next(d for d in topo["devices"] if d["name"] == t["device"])
-        inj    = run_injection_cycle(device, t["dpa"])
-        det    = run_detection(device["name"], t["dpa"], caps, simulated=inj.get("simulated", False))
-        print("\n-- detection result --"); print(json.dumps(det, indent=2))
+        inj = injection(device, t["dpa"])
+        det = detection(device["name"], t["dpa"], caps, simulated=inj.get("simulated", False))
+        print("\n-- detection result --")
+        print(json.dumps(det, indent=2))
 PYEOF
 
 # reporting/report.py 
 cat > "$INSTALL_DIR/reporting/report.py" << 'PYEOF'
 import os, sys, json, time
 
+from utils.checks import ok, warn, fail, info, GREEN, YELLOW, RED, RESET, BOLD
+
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, BASE_DIR)
 
-GREEN  = "\033[92m"; YELLOW = "\033[93m"; RED = "\033[91m"; BOLD = "\033[1m"; RESET = "\033[0m"
-def ok(msg):   print(f"  {GREEN}[pass]{RESET} {msg}")
-def warn(msg): print(f"  {YELLOW}[warn]{RESET} {msg}")
-def fail(msg): print(f"  {RED}[fail]{RESET} {msg}")
-def info(msg): print(f"  [info] {msg}")
-
-def generate_run_id(): return f"cxl-fi-{time.strftime('%Y%m%d-%H%M%S')}"
+def generate_run_id():
+    return f"cxl-fi-{time.strftime('%Y%m%d-%H%M%S')}"
 
 def collect_flags(inj, det):
-    flags = []; cv = det.get("cross_verify", {})
-    if not inj.get("injection_confirmed"): flags.append("FAIL_INJECTION_UNCONFIRMED")
-    if not inj.get("cleared"):             flags.append("FAIL_CLEAR_FAILED")
-    if not inj.get("verified_clean"):      flags.append("FAIL_VERIFY_FAILED")
-    if det["path1"]["result"] == "MISS":   flags.append("FAIL_PATH1_MISS")
-    if det["path3"]["result"] == "MISS":   flags.append("WARN_PATH3_MISS")
-    if det["path2"]["result"] == "FIRED":  flags.append("CRIT_MCE_FIRED")
-    if cv.get("verdict") == "FIRMWARE_BUG": flags.append("BUG_FIRMWARE")
-    if inj.get("simulated"):               flags.append("INFO_SIMULATED_MODE")
+    flags = []
+    cv = det.get("cross_verify", {})
+    if not inj.get("injection_confirmed"):
+        flags.append("FAIL_INJECTION_UNCONFIRMED")
+    if not inj.get("cleared"):
+        flags.append("FAIL_CLEAR_FAILED")
+    if not inj.get("verified_clean"):
+        flags.append("FAIL_VERIFY_FAILED")
+    if det["path1"]["result"] == "MISS":
+        flags.append("FAIL_PATH1_MISS")
+    if det["path3"]["result"] == "MISS":
+        flags.append("WARN_PATH3_MISS")
+    if det["path2"]["result"] == "FIRED":
+        flags.append("CRIT_MCE_FIRED")
+    if cv.get("verdict") == "FIRMWARE_BUG":
+        flags.append("BUG_FIRMWARE")
+    if inj.get("simulated"):
+        flags.append("INFO_SIMULATED_MODE")
     return flags
 
 def _show_path(label, result, extra):
-    if   result == "HIT":                     ok(f"{label}: {result}{extra}")
-    elif result in ("SILENT", "NOT_AVAILABLE"): info(f"{label}: {result}{extra}")
-    elif result == "MISS":                    fail(f"{label}: {result}{extra}")
-    else:                                     warn(f"{label}: {result}{extra}")
+    if result == "HIT":
+        ok(f"{label}: {result}{extra}")
+    elif result in ("SILENT", "NOT_AVAILABLE"):
+        info(f"{label}: {result}{extra}")
+    elif result == "MISS":
+        fail(f"{label}: {result}{extra}")
+    else:
+        warn(f"{label}: {result}{extra}")
 
 def _show_verdict(verdict):
-    if   verdict in ("PERFECT", "PASS"):      ok(f"cross-verify: {verdict}")
-    elif verdict == "WARN_PATH3_MISS":        warn(f"cross-verify: {verdict}")
-    elif verdict == "FIRMWARE_BUG":           fail(f"cross-verify: {verdict} -- firmware issue detected")
-    elif verdict == "FAIL_PATH1_MISS":        fail(f"cross-verify: {verdict} -- critical failure")
-    else:                                     warn(f"cross-verify: {verdict}")
+    if verdict in ("PERFECT", "PASS"):
+        ok(f"cross-verify: {verdict}")
+    elif verdict == "WARN_PATH3_MISS":
+        warn(f"cross-verify: {verdict}")
+    elif verdict == "FIRMWARE_BUG":
+        fail(f"cross-verify: {verdict} -- firmware issue detected")
+    elif verdict == "FAIL_PATH1_MISS":
+        fail(f"cross-verify: {verdict} -- critical failure")
+    else:
+        warn(f"cross-verify: {verdict}")
 
 def print_live_result(inj, det):
-    device = inj["device"]; dpa = inj["dpa"]; verdict = det["cross_verify"]["verdict"]
-    print(f"\n  result: {device} @ {dpa}"); print(f"  {'-'*43}")
-    if inj["injected"]: ok(f"injected via {inj.get('injection_method', 'unknown')}")
-    else:               fail("injection failed")
-    if inj["injection_confirmed"]: ok("injection confirmed")
-    else:                          warn("injection not confirmed")
-    p1 = det["path1"]["result"]; p2 = det["path2"]["result"]; p3 = det["path3"]["result"]
-    lat = det["path1"].get("latency_ms"); lat_str = f" ({lat}ms)" if lat is not None else ""
-    _show_path("path 1 mailbox poll", p1, lat_str)
-    _show_path("path 2 mce",          p2, "")
-    _show_path("path 3 event interrupt", p3, "")
-    print(f"  {'-'*43}"); _show_verdict(verdict)
-    if inj["cleared"]: ok(f"cleared via {inj.get('clear_method', 'unknown')}")
-    else:              fail("clear failed")
-    if inj["verified_clean"]: ok("verified clean")
-    else:                     fail("poison still present after clear")
+    device = inj["device"]
+    dpa = inj["dpa"]
+    verdict = det["cross_verify"]["verdict"]
+    print(f"\n  result: {device} @ {dpa}")
     print(f"  {'-'*43}")
-    if inj["overall"] == "PASS": print(f"  {GREEN}{BOLD}overall: pass{RESET}")
-    else:                        print(f"  {RED}{BOLD}overall: fail{RESET}")
+    if inj["injected"]:
+        ok(f"injected via {inj.get('injection_method', 'unknown')}")
+    else:
+        fail("injection failed")
+    if inj["injection_confirmed"]:
+        ok("injection confirmed")
+    else:
+        warn("injection not confirmed")
+    p1 = det["path1"]["result"]
+    p2 = det["path2"]["result"]
+    p3 = det["path3"]["result"]
+    lat = det["path1"].get("latency_ms")
+    lat_str = f" ({lat}ms)" if lat is not None else ""
+    _show_path("path 1 mailbox poll", p1, lat_str)
+    _show_path("path 2 mce", p2, "")
+    _show_path("path 3 event interrupt", p3, "")
+    print(f"  {'-'*43}")
+    _show_verdict(verdict)
+    if inj["cleared"]:
+        ok(f"cleared via {inj.get('clear_method', 'unknown')}")
+    else:
+        fail("clear failed")
+    if inj["verified_clean"]:
+        ok("verified clean")
+    else:
+        fail("poison still present after clear")
+    print(f"  {'-'*43}")
+    if inj["overall"] == "PASS":
+        print(f"  {GREEN}{BOLD}overall: pass{RESET}")
+    else:
+        print(f"  {RED}{BOLD}overall: fail{RESET}")
     flags = collect_flags(inj, det)
     if flags:
         print(f"  flags:")
-        for f in flags: print(f"    {YELLOW}{f}{RESET}")
+        for f in flags:
+            print(f"    {YELLOW}{f}{RESET}")
 
 def build_report(run_id, checks, topology, strategy, all_inj, all_det):
-    results = []; passed = failed = warnings = firmware_bugs = 0
+    results = []
+    passed = 0
+    failed = 0
+    warnings = 0
+    firmware_bugs = 0
     for inj, det in zip(all_inj, all_det):
         flags = collect_flags(inj, det)
         results.append({
@@ -764,10 +931,14 @@ def build_report(run_id, checks, topology, strategy, all_inj, all_det):
                           "clear_time": inj.get("clear_time")},
             "flags": flags, "overall": inj.get("overall", "FAIL")
         })
-        if inj.get("overall") == "PASS": passed += 1
-        else:                            failed += 1
-        if any(f.startswith("WARN") for f in flags): warnings += 1
-        if "BUG_FIRMWARE" in flags:                  firmware_bugs += 1
+        if inj.get("overall") == "PASS":
+            passed += 1
+        else:
+            failed += 1
+        if any(f.startswith("WARN") for f in flags):
+            warnings += 1
+        if "BUG_FIRMWARE" in flags:
+            firmware_bugs += 1
     return {
         "run_id": run_id, "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "environment": {"mode": checks.get("environment_mode"),
@@ -783,7 +954,8 @@ def build_report(run_id, checks, topology, strategy, all_inj, all_det):
 
 def print_summary(report):
     s = report["summary"]
-    print(f"\n  run summary -- {report['run_id']}"); print(f"  {'-'*43}")
+    print(f"\n  run summary -- {report['run_id']}")
+    print(f"  {'-'*43}")
     print(f"  strategy   : {report['strategy']}")
     print(f"  environment: {report['environment']['mode']}")
     print(f"  kernel     : {report['environment']['kernel']}")
@@ -794,37 +966,39 @@ def print_summary(report):
     print(f"  {YELLOW}warnings: {s['warnings']}{RESET}")
     print(f"  fw bugs : {s['firmware_bugs_detected']}")
     print(f"  {'-'*43}")
-    if   s["failed"] == 0 and s["firmware_bugs_detected"] == 0: print(f"  {GREEN}{BOLD}all tests passed{RESET}")
-    elif s["firmware_bugs_detected"] > 0:                       print(f"  {RED}{BOLD}firmware bugs detected{RESET}")
-    else:                                                        print(f"  {RED}{BOLD}some tests failed{RESET}")
+    if s["failed"] == 0 and s["firmware_bugs_detected"] == 0:
+        print(f"  {GREEN}{BOLD}all tests passed{RESET}")
+    elif s["firmware_bugs_detected"] > 0:
+        print(f"  {RED}{BOLD}firmware bugs detected{RESET}")
+    else:
+        print(f"  {RED}{BOLD}some tests failed{RESET}")
 
 def save_report(report, output_path=None):
     if not output_path:
         log_dir = os.path.join(BASE_DIR, "logs")
         os.makedirs(log_dir, exist_ok=True)
         output_path = os.path.join(log_dir, f"{report['run_id']}.json")
-    with open(output_path, "w") as f: json.dump(report, f, indent=2)
-    ok(f"report saved: {output_path}"); return output_path
+    with open(output_path, "w") as f:
+        json.dump(report, f, indent=2)
+    ok(f"report saved: {output_path}")
+    return output_path
 PYEOF
 
 # main.py 
 cat > "$INSTALL_DIR/main.py" << 'PYEOF'
 import os, sys, argparse, json
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, BASE_DIR)
-
-from utils.checks       import run_all_checks
-from discovery.discover import run_discovery
-from strategy.strategy  import run_strategy
-from injection.inject   import run_injection_cycle
-from detection.detect   import run_detection
+from utils.checks       import all_checks
+from discovery.discover import discovery
+from strategy.strategy  import strategy
+from injection.inject   import injection
+from detection.detect   import detection
 from reporting.report   import (
     generate_run_id, print_live_result,
     build_report, print_summary, save_report
 )
 
-GREEN  = "\033[92m"; YELLOW = "\033[93m"; RED = "\033[91m"; BOLD = "\033[1m"; RESET = "\033[0m"
+from utils.checks import GREEN, YELLOW, RED, BOLD, RESET
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -851,48 +1025,66 @@ examples:
     return parser.parse_args()
 
 def main():
-    args   = parse_args()
+    args = parse_args()
     run_id = generate_run_id()
     print(f"\n  cxl fault injector")
     print(f"  run id   : {run_id}")
     print(f"  strategy : {args.strategy}")
     print(f"  device   : {args.device}")
-    if args.dry_run: print(f"  {YELLOW}mode     : dry run -- no injection will occur{RESET}")
+    if args.dry_run:
+        print(f"  {YELLOW}mode     : dry run -- no injection will occur{RESET}")
     print()
 
-    print("=" * 45); print("  phase 1 -- environment checks"); print("=" * 45)
-    checks = run_all_checks()
+    print("=" * 45)
+    print("   environment checks")
+    print("=" * 45)
+    checks = all_checks()
     if checks is None:
-        print(f"\n{RED}critical check failed, exiting.{RESET}"); sys.exit(1)
+        print(f"\n{RED}critical check failed, exiting.{RESET}")
+        sys.exit(1)
     caps = checks["detection_capabilities"]
 
-    print(f"\n{'='*45}"); print("  phase 2 -- device discovery"); print("=" * 45)
-    topo = run_discovery()
+    print(f"\n{'='*45}")
+    print("   device discovery")
+    print("=" * 45)
+    topo = discovery()
     if topo["total_devices"] == 0:
-        print(f"\n{RED}no cxl devices found, exiting.{RESET}"); sys.exit(1)
-    if args.verbose: print(json.dumps(topo, indent=2))
+        print(f"\n{RED}no cxl devices found, exiting.{RESET}")
+        sys.exit(1)
+    if args.verbose:
+        print(json.dumps(topo, indent=2))
 
-    print(f"\n{'='*45}"); print("  phase 3 -- strategy engine"); print("=" * 45)
-    targets = run_strategy(
+    print(f"\n{'='*45}")
+    print("   strategy engine")
+    print("=" * 45)
+    targets = strategy(
         topo, strategy=args.strategy, device_name=args.device,
         numa_node=args.numa_node, limit=args.limit, dry_run=args.dry_run
     )
     if args.dry_run:
-        print(f"\n  {YELLOW}dry run done, exiting.{RESET}\n"); sys.exit(0)
+        print(f"\n  {YELLOW}dry run done, exiting.{RESET}\n")
+        sys.exit(0)
     if not targets:
-        print(f"\n{RED}no targets generated, exiting.{RESET}"); sys.exit(1)
+        print(f"\n{RED}no targets generated, exiting.{RESET}")
+        sys.exit(1)
 
-    print(f"\n{'='*45}"); print("  phase 4 & 5 -- injection and detection"); print("=" * 45)
-    all_inj, all_det = [], []
+    print(f"\n{'='*45}")
+    print("   injection and detection")
+    print("=" * 45)
+    all_inj = []
+    all_det = []
     for i, t in enumerate(targets, 1):
         print(f"\n  [{i}/{len(targets)}] {t['device']} @ {t['dpa']}")
         device = next(d for d in topo["devices"] if d["name"] == t["device"])
-        inj    = run_injection_cycle(device, t["dpa"])
-        det    = run_detection(device["name"], t["dpa"], caps, simulated=inj.get("simulated", False))
+        inj = injection(device, t["dpa"])
+        det = detection(device["name"], t["dpa"], caps, simulated=inj.get("simulated", False))
         print_live_result(inj, det)
-        all_inj.append(inj); all_det.append(det)
+        all_inj.append(inj)
+        all_det.append(det)
 
-    print(f"\n{'='*45}"); print("  phase 6 -- report"); print("=" * 45)
+    print(f"\n{'='*45}")
+    print("   report")
+    print("=" * 45)
     report = build_report(run_id, checks, topo, args.strategy, all_inj, all_det)
     print_summary(report)
     save_report(report, output_path=args.output)
