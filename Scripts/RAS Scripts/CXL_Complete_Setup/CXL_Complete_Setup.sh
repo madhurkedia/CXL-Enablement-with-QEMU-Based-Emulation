@@ -1,8 +1,7 @@
 #!/bin/bash
 # CXL Full Support — Error Injection and Topology Emulation Setup
-# CXL_LAB ISOLATED TEST ENVIRONMENT
 #
-# What this script does:
+# Objectives:
 #   - Builds a custom WSL2 kernel with KVM support
 #   - Builds QEMU (jic23 CXL fork) with 3 critical CXL RAS patches
 #   - Builds Linux 6.18 guest kernel with full CXL + RAS + PMEM support
@@ -10,26 +9,12 @@
 #   - Creates volatile CXL backing files  (for error injection)
 #   - Creates persistent CXL backing files (for PMEM topology)
 #   - Sets up OVMF UEFI firmware           (for PMEM topology)
-#   - Creates two ready-to-run launch scripts
-#
-# ISOLATED ENVIRONMENT — CXL_LAB FOLDER:
-#   Everything lives inside ~/cxl_lab — QEMU, kernel, images, scripts.
-#   Your existing ~/qemu and ~/cxl setups are NOT touched at all.
-#   To delete everything: rm -rf ~/cxl_lab
-#
-# After this script completes you have two modes:
-#   ~/cxl_lab/cxl/start-cxl.sh       — RAS error injection testing
-#   ~/cxl_lab/cxl/start-cxl-pmem.sh  — Persistent memory topology exploration
-#
-# IMPORTANT: Windows username is hardcoded as 'User'
-#   If your Windows username is different, change WINDOWS_USER below.
-#
-# Host OS  : Ubuntu 24.04 LTS on WSL2
-# Run from : WSL2 host terminal (user@DESKTOP-...)
+
+
 
 set -euo pipefail
 
-# CONFIGURATION — change WINDOWS_USER if needed
+# CONFIGURATION 
 WINDOWS_USER="User"
 WINDOWS_PATH="/mnt/c/Users/${WINDOWS_USER}"
 CXL_LAB_DIR="${HOME}/cxl_lab"
@@ -72,14 +57,10 @@ error_handler() {
 trap 'error_handler ${LINENO} "${BASH_COMMAND}"' ERR
 
 echo ""
-echo "========================================================"
 echo "  CXL Full Support — Error Injection and Topology"
 echo "  Emulation Setup"
-echo "  This will take 1-3 hours on first run"
-echo "========================================================"
 echo ""
 
-# PHASE 1: SYSTEM DEPENDENCIES
 phase1_dependencies() {
     info "PHASE 1: Installing build dependencies..."
 
@@ -102,7 +83,7 @@ phase1_dependencies() {
     success "Dependencies installed."
 }
 
-# PHASE 2: CUSTOM WSL2 KERNEL
+
 phase2_wsl2_kernel() {
     info "PHASE 2: Building custom WSL2 kernel with KVM support..."
 
@@ -138,11 +119,9 @@ phase2_wsl2_kernel() {
     success ".wslconfig written to C:\\Users\\${WINDOWS_USER}\\.wslconfig"
 
     echo ""
-    echo "========================================================"
     echo "  WSL2 is shutting down now to apply the new kernel."
     echo "  Please reopen your WSL2 terminal and run this"
     echo "  script again. It will resume from Phase 3 automatically."
-    echo "========================================================"
     echo ""
 
     powershell.exe -Command "wsl --shutdown"
@@ -162,8 +141,6 @@ phase3_qemu() {
         cd ~
     fi
 
-    # jic23 fork (cxl-2025-03-20) has better CXL topology support than mainline.
-    # All 3 RAS patches apply cleanly to this fork.
     cd ~
     if [[ ! -d "${QEMU_DIR}" ]]; then
         git clone https://gitlab.com/jic23/qemu.git \
@@ -174,11 +151,8 @@ phase3_qemu() {
         cd "${QEMU_DIR}"
     fi
 
-    # PATCH 1: CXL RAS error mask fix
-    # QEMU initialises both UNC and COR RAS mask registers with all bits set,
-    # silently dropping every injected error before it reaches the kernel.
-    # Setting both to 0 unmasks all error types so injection works correctly.
-    # Idempotent: checks before applying so re-runs don't corrupt the file.
+    # PATCH 1: Unmask RAS Errors
+
     info "Applying patch 1: CXL RAS error mask (cxl-component-utils.c)..."
     if grep -q "R_CXL_RAS_UNC_ERR_MASK, 0);" hw/cxl/cxl-component-utils.c; then
         success "Patch 1 already applied, skipping."
@@ -193,9 +167,6 @@ phase3_qemu() {
     fi
 
     # PATCH 2: PCIe AER correctable mask fix
-    # Clears PCI_ERR_COR_INTERNAL from the correctable mask in cxl_type3.c
-    # so correctable AER injections are not silently dropped.
-    # TARGET FILE: hw/mem/cxl_type3.c (NOT cxl_root_port.c)
     info "Applying patch 2: PCIe AER correctable mask (cxl_type3.c)..."
     if grep -q "PCI_ERR_COR_INTERNAL" hw/mem/cxl_type3.c; then
         success "Patch 2 already applied, skipping."
@@ -208,7 +179,6 @@ phase3_qemu() {
     fi
 
     # PATCH 3: Set Partition Info mailbox command
-    # Adds CCI opcode 0x4101 (Set Partition Info) missing from mainline QEMU.
     info "Applying patch 3: Set Partition Info mailbox command..."
     python3 << 'PYEOF'
 path = 'hw/cxl/cxl-mailbox-utils.c'
@@ -283,13 +253,10 @@ PYEOF
         || die "QEMU built but CXL devices not found. Check build output."
 }
 
-# PHASE 4: GUEST KERNEL
+
 phase4_guest_kernel() {
     info "PHASE 4: Building Linux 6.18 guest kernel with CXL + RAS + PMEM..."
-    # v6.18 is used because it is actually newer than v7.0 in real time.
-    # v6.18 has more mature CXL PMEM and DAX handling and works for
-    # both RAS error injection and persistent memory topology.
-
+   
     mkdir -p "${CXL_DIR}"
     cd "${CXL_DIR}"
 
@@ -314,13 +281,12 @@ phase4_guest_kernel() {
     scripts/config --enable CONFIG_CXL_PMEM
     scripts/config --enable CONFIG_CXL_MEM_RAW_COMMANDS
     scripts/config --enable CONFIG_CXL_SUSPEND
-    # Bypasses hardware cache invalidation — required for emulation
+    # Bypasses hardware cache invalidation 
     scripts/config --enable CONFIG_CXL_REGION_INVALIDATION_TEST
 
     # DAX / PMEM / Zone Device
     scripts/config --enable CONFIG_ZONE_DEVICE
     # TRANSPARENT_HUGEPAGE is a required dependency for DEV_DAX.
-    # Without it olddefconfig silently drops DEV_DAX and DEV_DAX_KMEM.
     scripts/config --enable CONFIG_TRANSPARENT_HUGEPAGE
     scripts/config --enable CONFIG_DEV_DAX
     scripts/config --enable CONFIG_DEV_DAX_CXL
@@ -335,8 +301,6 @@ phase4_guest_kernel() {
     # Memory hotplug / NUMA
     scripts/config --enable CONFIG_MEMORY_HOTPLUG
     scripts/config --enable CONFIG_MEMORY_HOTREMOVE
-    # Correct config name for kernel 6.18 — sets hotplugged memory online auto.
-    # CONFIG_MEMORY_HOTPLUG_DEFAULT_ONLINE is the old name and does not exist.
     scripts/config --set-val CONFIG_MHP_DEFAULT_ONLINE_TYPE 1
     scripts/config --enable CONFIG_NUMA
     scripts/config --enable CONFIG_ACPI_NUMA
@@ -377,7 +341,7 @@ phase4_guest_kernel() {
     success "Guest kernel built and saved to ${CXL_LAB_DIR}/cxl_guest_kernel_lab"
 }
 
-# PHASE 5: OVMF FIRMWARE
+
 phase5_ovmf() {
     info "PHASE 5: Setting up OVMF UEFI firmware..."
 
@@ -396,7 +360,7 @@ phase5_ovmf() {
     success "OVMF firmware ready."
 }
 
-# PHASE 6: VM DISK AND CXL BACKING FILES
+
 phase6_images() {
     info "PHASE 6: Setting up VM disk and CXL backing files..."
 
@@ -469,7 +433,6 @@ METAEOF
 }
 
 
-# PHASE 7: LAUNCH SCRIPTS
 phase7_launch_scripts() {
     info "PHASE 7: Creating launch scripts..."
 
@@ -477,13 +440,12 @@ phase7_launch_scripts() {
     cat > "${CXL_DIR}/start-cxl.sh" << 'EOF'
 #!/bin/bash
 # CXL RAS Error Injection Launch Script
-# Use this for: error injection, RAS testing, observability
 #
 # STEP 1 — Run this script to start QEMU:
 #   cd ~/cxl_lab/cxl && ./start-cxl.sh
 #   Login: ubuntu / ubuntu
 #
-# STEP 2 — Inside guest (run after every boot):
+# STEP 2 — Inside guest :
 #   sudo su
 #   cxl create-region -d decoder0.0 -m mem0 -s 512M -t ram
 #   echo 1 > /sys/kernel/debug/tracing/tracing_on
@@ -495,16 +457,7 @@ phase7_launch_scripts() {
 #   {"execute": "qmp_capabilities"}
 #   (then paste injection commands from CXL_Injection_Reference.sh)
 #
-# DEVICE MAPPING (important):
-#   /machine/peripheral/cxl1 -> guest mem1  (inject here for all errors)
-#   /machine/peripheral/cxl0 -> guest mem0  (not used for injection)
-#   Region creation  : cxl create-region -d decoder0.0 -m mem0 -s 512M -t ram
-#   Poison trigger   : echo 1 > /sys/bus/cxl/devices/mem1/trigger_poison_list
-#   AER clear before : setpci -s 0000:0e:00.0 0x204.l=0xffffffff
 #
-# CLEAN STATE (before each new error type):
-#   echo > /sys/kernel/debug/tracing/trace
-#   pkill -f qemu-system-x86_64 && sleep 2 && ./start-cxl.sh  (full reset)
 
 sudo modprobe kvm
 sudo modprobe kvm_intel 2>/dev/null || sudo modprobe kvm_amd 2>/dev/null || true
@@ -592,7 +545,6 @@ EOF
     success "start-cxl-pmem.sh created."
 }
 
-# PHASE 8: PRE-FLIGHT VALIDATION
 phase8_validate() {
     info "PHASE 8: Validating complete environment..."
 
@@ -642,9 +594,7 @@ main() {
     phase8_validate
 
     echo ""
-    echo "========================================================"
-    echo "  SETUP COMPLETE — CXL_LAB ENVIRONMENT"
-    echo "========================================================"
+    echo "  SETUP COMPLETE"
     echo ""
     echo "  For RAS error injection testing:"
     echo "    cd ~/cxl_lab/cxl && ./start-cxl.sh"
@@ -652,8 +602,6 @@ main() {
     echo "  For persistent memory topology:"
     echo "    cd ~/cxl_lab/cxl && ./start-cxl-pmem.sh"
     echo ""
-    echo "  To delete everything:"
-    echo "    rm -rf ~/cxl_lab"
     echo ""
 }
 
