@@ -9,7 +9,7 @@
 #   3.  Dependency installation (including deb-src + build-dep qemu)
 #   4.  Building CXL-enabled QEMU (Jonathan Cameron fork)
 #   5.  Building Linux 6.18 CXL kernel (full config set)
-#   6.  OVMF setup
+#   6.  OVMF setup (built from edk2 source)
 #   7.  Ubuntu Noble cloud image preparation
 #   8.  Guest customization (password, SSH, netplan, modules, ndctl,
 #       networkd-wait-online fix)
@@ -58,6 +58,7 @@ QEMU_INSTALL="${WORKSPACE}/qemu_install"
 
 QEMU_SRC="${QEMU_BUILD}/qemu"
 KERNEL_SRC="${KERNEL_BUILD}/linux"
+EDK2_SRC="${TOOLS}/edk2"
 
 GUEST_IMAGE="${IMAGES}/cxl-guest.qcow2"
 
@@ -128,7 +129,8 @@ install_dependencies() {
         libkeyutils-dev libiniparser-dev libtraceevent-dev libtracefs-dev \
         libnl-3-dev libnl-route-3-dev libibverbs-dev librdmacm-dev \
         libusb-1.0-0-dev libepoxy-dev libdrm-dev libgbm-dev libegl1-mesa-dev \
-        ovmf qemu-utils libguestfs-tools \
+        qemu-utils libguestfs-tools \
+        nasm iasl \
         socat numactl iproute2 netcat-openbsd \
         sparse cscope exuberant-ctags \
         libvirglrenderer-dev libsdl2-dev libgtk-3-dev \
@@ -298,29 +300,81 @@ build_kernel() {
     success "Kernel build complete. Image at ${IMAGES}/bzImage-6.18-cxl"
 }
 
-# 6. OVMF Firmware Setup
+# 6. Build OVMF Firmware from edk2 Source
 setup_ovmf() {
-    info "Setting up OVMF UEFI firmware..."
+    info "Building OVMF UEFI firmware from edk2 source..."
+
+    # Clone edk2
+    cd "${TOOLS}"
+
+    if [[ ! -d "${EDK2_SRC}" ]]; then
+        git clone --recurse-submodules \
+            https://github.com/tianocore/edk2.git
+    fi
+
+    cd "${EDK2_SRC}"
+
+    # Ensure all submodules (CryptoPkg/openssl, etc.) are fully initialised.
+    git submodule update --init --recursive
+
+    # Bootstrap the edk2 build toolchain 
+    # BaseTools must be compiled before any package can be built.
+    info "Compiling edk2 BaseTools..."
+    make -C BaseTools -j"$(nproc)"
+
+    # Initialise the edk2 shell environment (defines EDK_TOOLS_PATH, etc.).
+    export PYTHON3_ENABLE=TRUE
+    export PYTHON_COMMAND=python3
+    # shellcheck source=/dev/null
+    source edksetup.sh --reconfig
+
+    # Resolve the active GCC toolchain tag 
+    if grep -q "^GCC_" Conf/tools_def.txt 2>/dev/null; then
+        EDK2_GCC_TAG="GCC"
+    elif grep -q "^GCC5_" Conf/tools_def.txt 2>/dev/null; then
+        EDK2_GCC_TAG="GCC5"
+    else
+        die "Cannot find a GCC toolchain tag (GCC or GCC5) in Conf/tools_def.txt"
+    fi
+    info "Using edk2 toolchain tag: ${EDK2_GCC_TAG}"
+
+    # Build OvmfPkg for x86-64 with a 4 MB flash layout
+    info "Building OvmfPkg (x86-64, 4 MB, RELEASE/no-secboot — matches Ubuntu APT binary)..."
+    build \
+        -a X64 \
+        -t "${EDK2_GCC_TAG}" \
+        -b RELEASE \
+        -p OvmfPkg/OvmfPkgX64.dsc \
+        -D FD_SIZE_4MB \
+        -D CC_MEASUREMENT_ENABLE=TRUE \
+        -D NETWORK_HTTP_BOOT_ENABLE=TRUE \
+        -D NETWORK_IP6_ENABLE=TRUE \
+        -D NETWORK_TLS_ENABLE \
+        -D TPM2_ENABLE=TRUE \
+        --pcd PcdUninstallMemAttrProtocol=TRUE \
+        -n "$(nproc)"
+
+    # Install firmware images into the images directory 
+    EDK2_FV="${EDK2_SRC}/Build/OvmfX64/RELEASE_${EDK2_GCC_TAG}/FV"
+
+    [[ -f "${EDK2_FV}/OVMF_CODE.fd" ]] \
+        || die "OvmfPkg build succeeded but OVMF_CODE.fd not found in ${EDK2_FV}"
+    [[ -f "${EDK2_FV}/OVMF_VARS.fd" ]] \
+        || die "OvmfPkg build succeeded but OVMF_VARS.fd not found in ${EDK2_FV}"
 
     cd "${IMAGES}"
 
-    # Verify OVMF package is installed before attempting copy.
-    ls /usr/share/OVMF/OVMF_*.fd > /dev/null 2>&1 \
-        || die "OVMF firmware files not found — ensure the 'ovmf' package is installed."
+    # Copy the read-only code store.
+    cp "${EDK2_FV}/OVMF_CODE.fd" ./OVMF_CODE.fd
 
-    # Copy pristine templates; the VM writes UEFI boot variables into
-    # OVMF_VARS.fd so we must never use the system originals directly.
-    cp /usr/share/OVMF/OVMF_CODE*.fd .
-    cp /usr/share/OVMF/OVMF_VARS*.fd .
+    # Copy a pristine variable store template.
+    cp "${EDK2_FV}/OVMF_VARS.fd" ./OVMF_VARS.fd
 
-    mv OVMF_CODE_4M.fd OVMF_CODE.fd 2>/dev/null || true
-    mv OVMF_VARS_4M.fd OVMF_VARS.fd 2>/dev/null || true
-
-    # Confirm these are regular files, not symlinks.
+    # Confirm these are plain files, not symlinks.
     file ./OVMF_CODE.fd
     file ./OVMF_VARS.fd
 
-    success "OVMF firmware ready."
+    success "OVMF firmware built from edk2 and ready at ${IMAGES}."
 }
 
 # 7. Prepare Ubuntu Noble Cloud Image
