@@ -79,7 +79,6 @@ def check_kernel():
 
 
 def all_checks():
-    print("=" * 45); print("cxl fault injector -- environment checks"); print("=" * 45)
     out = {}
     ver, ok_flag = check_kernel()
     out["kernel_version"] = ver
@@ -142,10 +141,6 @@ def build_topology(cli_devices):
     return topology
 
 def discovery():
-    print("=" * 45)
-    print("  cxl fault injector -- device discovery")
-    print("=" * 45)
-
     cli_devices = list_devices_via_cli()
     topo = build_topology(cli_devices)
     print("\n" + "=" * 45)
@@ -201,9 +196,6 @@ def sweep(device, limit=None):
 
 def strategy(topology, strategy="random_strategy", device_name=None,
              limit=None):
-    print("=" * 45)
-    print("  cxl fault injector -- strategy engine")
-    print("=" * 45)
     devices = topology["devices"]
     if device_name and device_name != "all":
         devices = [d for d in devices if d["name"] == device_name]
@@ -230,7 +222,7 @@ from utils.checks import ok, warn, fail, info
 def inject_cli(device_name, dpa):
     info(f"injecting via cxl-cli: {device_name} @ {dpa}")
     try:
-        r = subprocess.run(["cxl", "inject-poison", device_name, "--dpa", str(dpa)],
+        r = subprocess.run(["cxl", "inject-media-poison", device_name, "-a", str(dpa)],
                            capture_output=True, text=True, timeout=10)
         if r.returncode == 0:
             ok("cxl-cli injection accepted")
@@ -265,9 +257,6 @@ if __name__ == "__main__":
     import json
     from discovery.discover import discovery
     from strategy.strategy  import strategy
-    print("=" * 45)
-    print("  cxl fault injector -- injection test")
-    print("=" * 45)
     topo = discovery()
     targets = strategy(topo, strategy="random_strategy")
     for t in targets:
@@ -284,18 +273,36 @@ import  sys, subprocess, json
 from utils.checks import ok, warn, fail, info
 
 
+def to_int(val):
+    """Convert any address format (hex, decimal, octal) to integer."""
+    if isinstance(val, int):
+        return val
+    s = str(val).strip()
+    if s.startswith("0x") or s.startswith("0X"):
+        return int(s, 16)
+    elif s.startswith("0o") or s.startswith("0O"):
+        return int(s, 8)
+    else:
+        return int(s)
+
 def detection_check(device_name, dpa):
     info(f"detection check on {device_name}")
     try:
-        r = subprocess.run(["cxl", "list", "--poison", device_name],
+        r = subprocess.run(["cxl", "list", "--media-errors", "-m", device_name],
                            capture_output=True, text=True, timeout=10)
 
         raw = r.stdout.strip()
+        target_addr = to_int(dpa)
 
-        if dpa in raw:
-            ok(f"poisoned memory found: {dpa}")
-            return { "result": "HIT",
-                    "dpa_found": dpa }
+        data = json.loads(raw) if raw else []
+        if isinstance(data, dict):
+            data = [data]
+        for dev in data:
+            for err in dev.get("media_errors", []):
+                if to_int(err.get("offset", -1)) == target_addr:
+                    ok(f"poisoned memory found: {dpa}")
+                    return { "result": "HIT",
+                            "dpa_found": dpa }
         warn(f"poisoned memory not found: {dpa}")
         return { "result": "MISS",
                 "dpa_found": None }
@@ -318,9 +325,6 @@ if __name__ == "__main__":
     from discovery.discover import discovery
     from strategy.strategy  import strategy
     from injection.inject   import injection
-    print("=" * 45)
-    print("  cxl fault injector -- detection test")
-    print("=" * 45)
     checks = all_checks()
     topo = discovery()
     targets = strategy(topo, strategy="random_strategy")
