@@ -439,25 +439,6 @@ phase7_launch_scripts() {
     # start-cxl.sh — RAS error injection topology
     cat > "${CXL_DIR}/start-cxl.sh" << 'EOF'
 #!/bin/bash
-# CXL RAS Error Injection Launch Script
-#
-# STEP 1 — Run this script to start QEMU:
-#   cd ~/cxl_lab/cxl && ./start-cxl.sh
-#   Login: ubuntu / ubuntu
-#
-# STEP 2 — Inside guest :
-#   sudo su
-#   cxl create-region -d decoder0.0 -m mem0 -s 512M -t ram
-#   echo 1 > /sys/kernel/debug/tracing/tracing_on
-#   echo 1 > /sys/kernel/debug/tracing/events/cxl/enable
-#   echo > /sys/kernel/debug/tracing/trace
-#
-# STEP 3 — QMP terminal (separate host terminal):
-#   nc 127.0.0.1 4444
-#   {"execute": "qmp_capabilities"}
-#   (then paste injection commands from CXL_Injection_Reference.sh)
-#
-#
 
 sudo modprobe kvm
 sudo modprobe kvm_intel 2>/dev/null || sudo modprobe kvm_amd 2>/dev/null || true
@@ -493,20 +474,6 @@ EOF
     # start-cxl-pmem.sh — Persistent memory topology
     cat > "${CXL_DIR}/start-cxl-pmem.sh" << 'EOF'
 #!/bin/bash
-# CXL Persistent Memory Topology Launch Script
-# Use this for: PMEM namespaces, DAX mounts, LSA labels
-#
-# STEP 1 — Run this script:
-#   cd ~/cxl_lab/cxl && ./start-cxl-pmem.sh
-#
-# STEP 2 — SSH into guest (separate terminal):
-#   ssh ubuntu@localhost -p 2222   (password: ubuntu)
-#
-# STEP 3 — QMP via Unix socket (separate host terminal):
-#   socat - UNIX-CONNECT:/tmp/qmp-sock
-#   {"execute": "qmp_capabilities"}
-#
-# PMEM DEVICE: cxlpmem0 (persistent, 1GB) with LSA labels
 
 sudo modprobe kvm
 sudo modprobe kvm_intel 2>/dev/null || sudo modprobe kvm_amd 2>/dev/null || true
