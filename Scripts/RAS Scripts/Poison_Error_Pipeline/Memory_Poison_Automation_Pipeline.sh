@@ -1,9 +1,27 @@
 
-# INFO: This automation pipeline is under active development and evolving.
-# INFO: Current implementation is experimental and subject to refinement in future iterations.
-
-
 #  CXL Memory Fault Injection Framework
+#
+# Description:
+#   End-to-end automation pipeline for CXL memory fault injection and
+#   RAS (Reliability, Availability, Serviceability) validation.
+#
+#   This script bootstraps a self-contained Python framework under
+#   ~/cxl-fault-injector/ and immediately executes it. The framework:
+#
+#     1. Environment Checks  – Validates kernel version (requires 6.0+)
+#                              and Python 3 availability.
+#     2. Device Discovery    – Queries attached CXL memory devices via
+#                              `cxl list --memdevs` and builds a topology map.
+#     3. Strategy Engine     – Selects target DPA (Device Physical Addresses)
+#                              using one of two strategies:
+#                                • random_strategy  – one random cache-line
+#                                • sweep            – sequential cache-line scan
+#     4. Fault Injection     – Poisons selected DPAs via
+#                              `cxl inject-media-poison`.
+#     5. Detection           – Verifies the poison appears in
+#                              `cxl list --media-errors` output.
+#     6. Reporting           – Prints a live per-target pass/fail summary.
+#
 #  Usage:  chmod +x cxl_fault_injector.sh && sudo ./cxl_fault_injector.sh
 #          or with options:
 #          sudo ./cxl_fault_injector.sh --strategy sweep --limit 5
