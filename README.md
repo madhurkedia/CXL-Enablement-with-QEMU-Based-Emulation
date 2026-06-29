@@ -17,11 +17,15 @@ Automated Linux-based framework for emulating CXL memory devices, validating RAS
 
 | Feature | Description |
 | :--- | :--- |
-| **Volatile & Persistent Memory** | Full support for emulating both DRAM-like volatile backends and Storage-Class Memory (SCM).
+| **Volatile & Persistent Memory** | Full support for emulating both DRAM-like volatile backends (system RAM expansion) and Storage-Class Memory (SCM) with host-backed `.raw` files and LSA persistence.
+| **Dual-Switch Topology** | Two independent CXL switch hierarchies, each with an upstream and two downstream ports, providing two isolated memory pools for independent region and namespace management.
 | **Hot-Plug Support** | Simulate dynamic insertion/removal of CXL devices to test kernel-level event handling. 
 | **Dynamic BAR Configuration** | Implements Base Address Registers for seamless host discovery of device control registers.
-| **HDM Decoder Orchestration** | Advanced Host-managed Device Memory decoding for precise memory interleaving.
+| **HDM Decoder Orchestration** | Advanced Host-managed Device Memory decoding for precise memory interleaving across pools.
+| **DAX Filesystem Support** | Persistent memory pools formatted as `ext4` and mounted with Direct Access (`-o dax`), bypassing the page cache for wire-speed I/O.
+| **RAM Spillover Validation** | Volatile mode proves CXL capacity absorption via a 1.5 GiB `stress-ng` overallocation on a 1 GiB base-RAM guest.
 | **PCIe-to-CXL Transition** | Emulates "Flex Bus" logic, transitioning from standard PCIe to CXL via DVSEC negotiation.
+| **CEDT Verification** | OVMF generates a valid CXL Early Discovery Table at boot; verified via `acpidump` / `iasl` disassembly showing correct host bridge and Fixed Memory Window structures.
 | **Native Tool Support** | Fully compatible with industry-standard tools: `cxl-cli`, `ndctl`, and `libnvdimm`.
 | **Deep Inspection** | Optimized for hardware-level debugging using `lspci -vvv` and kernel-log analysis.
 
@@ -35,14 +39,28 @@ The project uses a Linux-based QEMU virtualization environment to emulate CXL Ty
 | :--- | :--- |
 | **Host Linux Environment** | Ubuntu host system running Linux Kernel, KVM, and QEMU virtualization stack. |
 | **QEMU Virtual Machine** | Creates an isolated virtual platform for CXL experimentation and validation. |
+| **OVMF / EDK2 Firmware** | UEFI firmware compiled from EDK2 source; generates the CEDT (CXL Early Discovery Table) and ACPI namespace entries required for kernel CXL enumeration. |
 | **Guest Linux Kernel** | Linux guest environment with native CXL subsystem and driver support enabled. |
-| **CXL Root Port Configuration** | Establishes the virtual CXL topology and device communication path. |
-| **CXL Type-3 Memory Device** | Emulates expandable CXL memory devices inside the virtual machine. |
-| **QMP-Based Fault Injection** | Injects poison and runtime memory faults using QEMU Machine Protocol (QMP). |
+| **Dual-Switch CXL Topology** | Two independent `pxb-cxl` root ports, each backed by an upstream switch with two downstream ports and two CXL Type-3 devices — forming two isolated memory pools. |
+| **CXL Type-3 Memory Device** | Emulates expandable CXL memory devices in both persistent (`cxl-pmem`) and volatile (`cxl-type3 volatile-memdev`) modes. |
+| **HDM Decoder & Region Configuration** | `cxl create-region` programs decoder hierarchy; interleave width and granularity are tunable per pool. |
+| **QMP-Based Fault Injection** | Injects poison and runtime memory faults using QEMU Machine Protocol via `/tmp/qmp-sock`. |
 | **AER Error Detection** | Detects runtime PCIe/CXL error events using Advanced Error Reporting mechanisms. |
 | **Kernel-Level Error Handling** | Triggers Linux kernel fault handling and recovery workflows for validation. |
 | **RAS Validation & Analysis** | Verifies Reliability, Availability, and Serviceability (RAS) behavior during runtime failures. |
 | **Runtime Debugging & Monitoring** | Uses `dmesg`, `cxl-cli`, `ndctl`, and `lspci` for runtime inspection and analysis. |
+
+---
+
+## Emulation Modes
+
+### Persistent Memory (PMEM)
+
+Emulates Storage-Class Memory using host-backed `.raw` files and Label Storage Areas (LSA). Data survives guest reboots. The full OS pipeline — region creation → namespace provisioning → `ext4` formatting → DAX mount — is automated via `operations.sh`.
+
+### Volatile Memory (VMEM)
+
+Emulates transparent System RAM expansion. The guest boots with 1 GiB of base RAM; four 1 GiB CXL volatile devices extend the address space. Memory blocks are brought online via sysfs (`echo online > .../state`) and absorbed by the Linux kernel as a new NUMA node. A 1.5 GiB `stress-ng` allocation — exceeding base RAM — proves active spillover into CXL capacity without OOM.
 
 ---
 
@@ -54,7 +72,7 @@ The project uses a Linux-based QEMU virtualization environment to emulate CXL Ty
 | **Protocol Layer** | CXL 2.x / 3.x
 | **Host/Guest OS** | Ubuntu 22.04 LTS / 24.04 LTS 
 | **Analysis Tools** | `cxl-cli`, `ndctl`, `lspci`, `dmesg` 
-| **Firmware** | OVMF (Open Virtual Machine Firmware)
+| **Firmware** | OVMF built from EDK2 source (Tianocore upstream) — no-secboot 4 MB variant, compiled with full flag control mirroring Ubuntu's `debian/rules` build configuration
 
 ---
 
@@ -70,7 +88,7 @@ To ensure protocol stability and high-fidelity emulation, the environment requir
   
 * **Packages**: `qemu-system-x86`, `cxl-cli`, and `ndctl`.
   
-* **Firmware**: **OVMF** (Open Virtual Machine Firmware) to enable UEFI boot support. 
+* **Firmware**: **OVMF** built from **EDK2 source** (Tianocore upstream) — required for CEDT generation and CXL host bridge enumeration. SeaBIOS cannot generate the CXL Early Discovery Table (CEDT) and must not be used. Build steps are documented in `Building_UEFI_Firmware_using_EDK2.pdf`.
 
 ---
 
