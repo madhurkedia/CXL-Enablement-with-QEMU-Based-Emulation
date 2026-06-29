@@ -32,7 +32,7 @@
 set -e
 
 # colours
-GREEN="\033[92m"; YELLOW="\033[93m"; RED="\033[91m"; BOLD="\033[1m"; RESET="\033[0m"
+GREEN="\033[92m"; YELLOW="\033[93m"; RED="\033[91m"; CYAN="\033[96m"; BOLD="\033[1m"; RESET="\033[0m"
 ok()   { echo -e "  ${GREEN}[ok]${RESET}   $*"; }
 warn() { echo -e "  ${YELLOW}[warn]${RESET} $*"; }
 fail() { echo -e "  ${RED}[fail]${RESET} $*"; }
@@ -73,7 +73,7 @@ ok "Directory structure created"
 cat > "$INSTALL_DIR/utils/checks.py" << 'PYEOF'
 import  platform
 
-GREEN  = "\033[92m"; YELLOW = "\033[93m"; RED = "\033[91m"; BOLD = "\033[1m"; RESET = "\033[0m"
+GREEN  = "\033[92m"; YELLOW = "\033[93m"; RED = "\033[91m"; CYAN = "\033[96m"; BOLD = "\033[1m"; RESET = "\033[0m"
 def ok(msg):   print(f"  {GREEN}[pass]{RESET} {msg}")
 def warn(msg): print(f"  {YELLOW}[warn]{RESET} {msg}")
 def fail(msg): print(f"  {RED}[fail]{RESET} {msg}")
@@ -102,7 +102,7 @@ def all_checks():
     out["kernel_version"] = ver
     if not ok_flag:
         print(f"\n{RED}kernel too old, exiting.{RESET}"); return None
-    print("\n" + "=" * 45); print("checks done"); print("=" * 45)
+    print(f"\n{CYAN}{BOLD}  checks done{RESET}")
     return out
 
 if __name__ == "__main__":
@@ -113,7 +113,7 @@ PYEOF
 cat > "$INSTALL_DIR/discovery/discover.py" << 'PYEOF'
 import  json, subprocess
 
-from utils.checks import ok, warn, fail, info
+from utils.checks import ok, warn, fail, info, CYAN, BOLD, RESET
 
 
 def list_devices_via_cli():
@@ -161,9 +161,7 @@ def build_topology(cli_devices):
 def discovery():
     cli_devices = list_devices_via_cli()
     topo = build_topology(cli_devices)
-    print("\n" + "=" * 45)
-    print("  discovery complete")
-    print("=" * 45)
+    print(f"\n{CYAN}{BOLD}  discovery complete{RESET}")
     print(json.dumps(topo, indent=2))
     return topo
 
@@ -358,7 +356,7 @@ PYEOF
 cat > "$INSTALL_DIR/reporting/report.py" << 'PYEOF'
 import os, json, time
 
-from utils.checks import ok, fail, info, GREEN, RED, RESET, BOLD
+from utils.checks import ok, fail, info, GREEN, RED, CYAN, RESET, BOLD
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -457,7 +455,7 @@ from reporting.report   import (
     build_report, print_summary, save_report
 )
 
-from utils.checks import GREEN, YELLOW, RED, BOLD, RESET
+from utils.checks import GREEN, YELLOW, RED, CYAN, BOLD, RESET
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -486,34 +484,25 @@ def main():
     print(f"  strategy : {args.strategy}")
     print(f"  device   : {args.device}")
     print()
-
-    print("=" * 45)
-    print("   environment checks")
-    print("=" * 45)
+    print(f"  {CYAN}{BOLD}environment checks{RESET}")
     checks = all_checks()
     if checks is None:
         print(f"\n{RED}critical check failed, exiting.{RESET}")
         sys.exit(1)
 
-    print(f"\n{'='*45}")
-    print("   device discovery")
-    print("=" * 45)
+    print(f"\n  {CYAN}{BOLD}device discovery{RESET}")
     topo = discovery()
     if topo["total_devices"] == 0:
         print(f"\n{RED}no cxl devices found, exiting.{RESET}")
         sys.exit(1)
 
 
-    print(f"\n{'='*45}")
-    print("   strategy engine")
-    print("=" * 45)
+    print(f"\n  {CYAN}{BOLD}strategy engine{RESET}")
     targets = strategy(
         topo, strategy=args.strategy, device_name=args.device, limit=args.limit
     )
 
-    print(f"\n{'='*45}")
-    print("   injection and detection")
-    print("=" * 45)
+    print(f"\n  {CYAN}{BOLD}injection and detection{RESET}")
     all_inj = []
     all_det = []
     for i, t in enumerate(targets, 1):
@@ -525,9 +514,7 @@ def main():
         all_inj.append(inj)
         all_det.append(det)
 
-    print(f"\n{'='*45}")
-    print("   report")
-    print("=" * 45)
+    print(f"\n  {CYAN}{BOLD}report{RESET}")
     report = build_report(run_id, checks, topo, args.strategy, all_inj, all_det)
     print_summary(report)
     save_report(report, output_path=args.output)
