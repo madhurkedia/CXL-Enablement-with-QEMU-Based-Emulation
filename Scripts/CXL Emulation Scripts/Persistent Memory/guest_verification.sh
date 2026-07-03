@@ -10,13 +10,13 @@ success() { echo -e "${GREEN}[OK]${NC}    $*"; }
 warn()    { echo -e "${YELLOW}[WARN]${NC}  $*"; }
 
 guest_mount_hostshare() {
-    info "Mounting VirtFS host-share inside guest..."
+    info "Mounting VirtFS host-share inside guest"
     sudo mkdir -p /mnt/hostshare
     sudo mount -t 9p -o trans=virtio hostshare /mnt/hostshare || warn "Hostshare not available, continuing locally."
 }
 
 guest_verify_kernel() {
-    info "Verifying guest kernel version..."
+    info "Verifying guest kernel version"
     sudo uname -r
 }
 

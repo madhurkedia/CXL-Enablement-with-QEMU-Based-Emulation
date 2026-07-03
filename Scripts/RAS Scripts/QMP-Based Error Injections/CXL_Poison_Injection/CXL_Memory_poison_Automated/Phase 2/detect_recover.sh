@@ -14,7 +14,7 @@ log_info()    { echo -e "${CYAN}[INFO]${NC}  $1"; }
 log_success() { echo -e "${GREEN}[OK]${NC}    $1"; }
 log_warn()    { echo -e "${YELLOW}[WARN]${NC}  $1"; }
 log_error()   { echo -e "${RED}[ERROR]${NC} $1"; }
-log_phase()   { echo -e "\n${BOLD}$1${NC}"; echo "----------------------------------------------"; }
+log_phase()   { echo -e "\n${BOLD}$1${NC}"; }
 
 CXL_DEVICE="mem0"
 TRACE_PATH="/sys/kernel/debug/tracing/trace"
@@ -62,23 +62,23 @@ fi
 
 # PHASE 3 — Detection & Diagnosis
 
-log_phase "── PHASE 3: Detection & Diagnosis ──────────────────"
+log_phase "PHASE 3: Detection & Diagnosis"
 
 # Step 3.1 — Clear trace buffer before capture
-log_info "Clearing existing trace buffer..."
+log_info "Clearing existing trace buffer"
 echo > "$TRACE_PATH"
 log_success "Trace buffer cleared."
 
 # Step 3.2 — Trigger OS audit of hardware poison list
-log_info "Triggering OS audit of CXL hardware poison list..."
+log_info "Triggering OS audit of CXL hardware poison list"
 echo 1 > "$POISON_TRIGGER"
 sleep 1   # give the kernel a moment to process
 log_success "Poison list trigger fired."
 
 # Step 3.3 — Read trace log for poison detection events
-log_info "Reading kernel trace log for CXL poison events..."
+log_info "Reading kernel trace log for CXL poison events"
 echo ""
-echo "  ┌─ cxl_poison trace output ─────────────────────┐"
+echo "CXL_poison trace output"
 TRACE_OUTPUT=$(cat "$TRACE_PATH" | grep cxl_poison || true)
 if [ -n "$TRACE_OUTPUT" ]; then
     echo "$TRACE_OUTPUT" | sed 's/^/  │  /'
@@ -87,17 +87,15 @@ else
     log_warn "No cxl_poison events found in trace log."
     log_warn "Injection may not have landed yet — re-run inject_poison.sh first."
 fi
-echo "  └────────────────────────────────────────────────┘"
 echo ""
 
 # Step 3.4 — Hardware telemetry (optional, if cxl tool present)
 if [ "$CXL_TOOL_AVAILABLE" = true ]; then
-    log_info "Extracting hardware telemetry and alert thresholds..."
+    log_info "Extracting hardware telemetry and alert thresholds"
     echo ""
-    echo "  ┌─ cxl list --memdevs --alert-config ───────────┐"
+    echo "CXL list --memdevs --alert-config"
     cxl list --memdevs --alert-config 2>/dev/null | sed 's/^/  │  /' || \
         log_warn "cxl list returned no output or an error."
-    echo "  └────────────────────────────────────────────────┘"
     echo ""
 else
     log_warn "Skipping cxl telemetry (tool not available)."
@@ -106,29 +104,29 @@ fi
 
 # PHASE 4 — Hardware Recovery & Scrubbing
 
-log_phase "── PHASE 4: Hardware Recovery & Scrubbing ──────────"
+log_phase "PHASE 4: Hardware Recovery & Scrubbing"
 
 # Step 4.1 — Clear trace buffer for clean recovery capture
-log_info "Clearing trace buffer (clean slate for recovery event)..."
+log_info "Clearing trace buffer (clean slate for recovery event)"
 echo > "$TRACE_PATH"
 log_success "Trace buffer cleared."
 
 # Step 4.2 — Dispatch Clear Poison command (Opcode 4301h) to DPA 0x1000
-log_info "Dispatching Clear Poison (Opcode 4301h) to DPA $POISON_DPA ..."
+log_info "Dispatching Clear Poison (Opcode 4301h) to DPA $POISON_DPA "
 echo "$POISON_DPA" > "$CLEAR_POISON_PATH"
 sleep 1
 log_success "Clear Poison command sent to $POISON_DPA."
 
 # Step 4.3 — Re-audit hardware to confirm poison is cleared
-log_info "Re-triggering hardware audit to verify recovery..."
+log_info "Re-triggering hardware audit to verify recovery"
 echo 1 > "$POISON_TRIGGER"
 sleep 1
 log_success "Post-recovery audit triggered."
 
 # Step 4.4 — Read trace log to confirm recovery event
-log_info "Reading kernel trace log for recovery confirmation..."
+log_info "Reading kernel trace log for recovery confirmation"
 echo ""
-echo "  ┌─ post-recovery cxl_poison trace output ────────┐"
+echo "Post-recovery cxl_poison trace output"
 RECOVERY_TRACE=$(cat "$TRACE_PATH" | grep cxl_poison || true)
 if [ -n "$RECOVERY_TRACE" ]; then
     echo "$RECOVERY_TRACE" | sed 's/^/  │  /'
@@ -136,13 +134,10 @@ if [ -n "$RECOVERY_TRACE" ]; then
 else
     log_success "No poison events in trace log — memory successfully scrubbed and recovered."
 fi
-echo "  └────────────────────────────────────────────────┘"
 echo ""
 
 
-echo "=============================================="
 echo -e "${BOLD}  Summary${NC}"
-echo "=============================================="
 echo ""
 log_info "Device       : $CXL_DEVICE"
 log_info "Target DPA   : $POISON_DPA"
