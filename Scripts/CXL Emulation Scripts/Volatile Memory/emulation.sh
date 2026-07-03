@@ -20,7 +20,7 @@ success() { echo -e "${GREEN}[OK]${NC}    $*"; }
 
 # Backing File Preparation 
 prepare_backing_files_volatile() {
-    info "Preparing volatile backing files (4 × 1 GiB)..."
+    info "Preparing volatile backing files (4 × 1 GiB)"
 
     mkdir -p "${IMAGES}" "${REPORTS_DIR}"
     cd "${IMAGES}"

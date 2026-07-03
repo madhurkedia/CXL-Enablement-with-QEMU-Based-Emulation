@@ -18,7 +18,7 @@ skip() { echo "[SKIP] $*"; ((SKIP++)); }
 info() { echo "[INFO] $*"; }
 warn() { echo "[WARN] $*"; }
 
-echo "   CXL RAS TEST SUITE (DEBUGFS BASED)"
+echo "CXL RAS TEST SUITE (DEBUGFS BASED)"
 info "Kernel : $(uname -r)"
 info "Host   : $(hostname)"
 info "Date   : $(date)"
@@ -27,7 +27,7 @@ echo ""
 
 #Mount debugfs if not already mounted
 
-echo "=== [0] Checking debugfs ==="
+echo "[0] Checking debugfs"
 if ! mountpoint -q /sys/kernel/debug; then
     mount -t debugfs debugfs /sys/kernel/debug && pass "debugfs mounted" || { fail "Could not mount debugfs"; exit 1; }
 else
@@ -69,10 +69,10 @@ echo ""
 
 echo " [3] Provisioning CXL region and namespace "
 if command -v cxl &>/dev/null; then
-    info "Attempting to create region..."
+    info "Attempting to create region"
     cxl create-region -m "$MEM" -d decoder0.0 2>/dev/null && pass "Region created" || warn "Region creation skipped (may already exist)"
 
-    info "Attempting to create namespace..."
+    info "Attempting to create namespace"
     cxl create-namespace -m "$MEM" 2>/dev/null && pass "Namespace created" || warn "Namespace creation skipped (may already exist)"
 
     info "Current CXL list:"

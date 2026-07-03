@@ -34,7 +34,7 @@ die()     { echo -e "${RED}[FAIL]${NC}  $*" >&2; exit 1; }
 
 # Pre-flight Checks
 preflight_checks() {
-    info "Running pre-flight checks..."
+    info "Running pre-flight checks"
     [[ -x "${QEMU_BIN}" ]]   || die "QEMU binary not found at ${QEMU_BIN}."
     [[ -f "${KERNEL}" ]]     || die "Guest kernel not found at ${KERNEL}."
     [[ -f "${OVMF_CODE}" ]]  || die "OVMF_CODE.fd not found at ${OVMF_CODE}."
@@ -46,7 +46,7 @@ preflight_checks() {
 # Backing File Preparation
 # Four 1 GiB memory devices so each ext4 filesystem has comfortable room.
 prepare_backing_files() {
-    info "Preparing backing files (4 × 1 GiB mem + 4 × 256 MiB lsa)..."
+    info "Preparing backing files (4 × 1 GiB mem + 4 × 256 MiB lsa)"
 
     mkdir -p "${IMAGES}" "${REPORTS_DIR}"
     cd "${IMAGES}"
@@ -71,7 +71,7 @@ prepare_backing_files() {
 
 # QEMU Launch 
 run() {
-    info "Launching — Dual-switch topology (two independent memory pools)..."
+    info "Launching — Dual-switch topology (two independent memory pools)"
 
     cd "${IMAGES}"
     [[ -e /tmp/qmp-sock ]] && rm -f /tmp/qmp-sock
