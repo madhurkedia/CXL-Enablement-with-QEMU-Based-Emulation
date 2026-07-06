@@ -54,20 +54,30 @@ The project uses a Linux-based QEMU virtualization environment to emulate CXL Ty
 ```
 .
 ├── Documentation/
-│   ├── CXL Emulation/               # Setup, build, and technical reports (PDF)
-│   ├── RAS/                         # RAS architecture, validation, mistakes & solutions
-│   └── PPT/                         # Project presentations
+│   ├── CXL Emulation/                         # Setup, build, and emulation reports (PDF)
+│   ├── RAS/                                   # RAS architecture, validation, mistakes & solutions
+│   └── PPT/                                   # Project presentations
 ├── Scripts/
 │   ├── CXL Emulation Scripts/
-│   │   ├── Persistent Memory/       # PMEM emulation + operations
-│   │   └── Volatile Memory/         # VMEM emulation + operations
-│   ├── CXL_Complete_Setup_Script/   # End-to-end launcher (CXL_Complete_Setup.sh)
+│   │   ├── Persistent Memory/                 # PMEM emulation + operations
+│   │   └── Volatile Memory/                   # VMEM emulation + operations
+│   ├── CXL_Complete_Setup_Script/             # End-to-end launcher (CXL_Complete_Setup.sh)
 │   └── RAS Scripts/
-│       ├── QMP-Based Error Injections/   # Six QMP-driven injection guides + reference
-│       ├── Debugfs/                 # Debugfs-based injection
-│       ├── General_Media_Error/     # Python general-media injection
-│       ├── Memory_poison/           # Host-side poison inject / detect / validate
-│       └── Poison_Error_Pipeline/   # Automated memory-poison pipeline
+│       ├── AER Injection/                     # AER-based error injection
+│       │   ├── AER_Inject_Correctable/        # Correctable AER injection script
+│       │   └── AER_Inject_Uncorrectable_Fatal/# Uncorrectable fatal AER injection script
+│       ├── Automated_Poison_Error_Pipeline/   # Automated memory-poison pipeline
+│       ├── CCI-Based Error Injection/         # CCI-based raw poison injection
+│       │   └── CXL_Raw_Poison_CCI/           # CCI poison injection script
+│       ├── Debugfs-Based Error Injection/     # Debugfs-based injection
+│       │   └── CXL_Poison_Debugfs/           # Debugfs poison injection script
+│       └── QMP-Based Error Injections/        # Six QMP-driven injection guides + reference
+│           ├── CXL_Correctable_AER_Error/
+│           ├── CXL_DRAM_Injection/
+│           ├── CXL_General_Media_Injection/
+│           ├── CXL_Memory_Module_Injection/
+│           ├── CXL_Poison_Injection/
+│           └── CXL_Uncorrectable_AER_Error/
 ├── LICENSE
 └── README.md
 ```
@@ -95,6 +105,44 @@ Emulates transparent System RAM expansion. The guest boots with 1 GiB of base RA
 | **Firmware** | OVMF built from EDK2 source (Tianocore upstream), no-secboot 4 MB variant |
 | **Analysis Tools** | `cxl-cli`, `ndctl`, `lspci`, `dmesg` |
 
+
+---
+
+## System Configuration
+
+The following hardware specifications are recommended for running the CXL emulation environment. Both platforms have been validated; native Ubuntu provides better KVM performance, while WSL2 offers accessibility on Windows hosts.
+
+### Native Ubuntu (Recommended)
+
+| Resource | Recommended Specification |
+| :--- | :--- |
+| **CPU** | x86_64, 8+ cores (Intel VT-x / AMD-V required) |
+| **RAM** | 16 GB minimum (32 GB recommended) |
+| **Disk** | 100 GB+ free (SSD strongly preferred) |
+| **OS** | Ubuntu 22.04 LTS or 24.04 LTS |
+| **Kernel** | Custom-compiled Linux v6.18+ with CXL subsystem enabled |
+| **KVM** | Native KVM acceleration required (`/dev/kvm` must be available) |
+
+### WSL2 (Windows Subsystem for Linux)
+
+| Resource | Recommended Specification |
+| :--- | :--- |
+| **Host CPU** | x86_64, 8+ cores (Intel VT-x / AMD-V required, enabled in BIOS) |
+| **Host RAM** | 16 GB minimum (32 GB recommended) |
+| **WSL2 RAM** | 8 GB+ allocated via `.wslconfig` (`memory=8GB` or higher) |
+| **Disk** | 100 GB+ free on the Windows host (SSD strongly preferred) |
+| **Host OS** | Windows 10 (Build 19041+) or Windows 11 |
+| **WSL2 Distro** | Ubuntu 22.04 LTS or 24.04 LTS |
+| **Kernel** | Custom-compiled WSL2 kernel v6.18+ with CXL and KVM modules enabled |
+| **KVM** | Nested virtualization must be enabled (`nestedVirtualization=true` in `.wslconfig`) |
+
+> **Note:** On WSL2, ensure your `.wslconfig` (located at `C:\Users\<user>\.wslconfig`) allocates sufficient resources. Example:
+> ```ini
+> [wsl2]
+> memory=12GB
+> processors=8
+> nestedVirtualization=true
+> ```
 
 ---
 
@@ -174,7 +222,7 @@ Detailed PDF references are organized under `Documentation/`:
 ---
 
 ## Acknowledgements
-This project was developed as part of the **HPE CPP3 Program**, representing a collaborative effort in advanced systems research and CXL enablement.
+This project was developed as part of the **Hewlett Packard Enterprise (HPE) CPP3 Program**, representing a collaborative effort in advanced systems research and CXL enablement.
 
 ---
 
