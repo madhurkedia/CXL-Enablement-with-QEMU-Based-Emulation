@@ -21,14 +21,14 @@ log_error()   { echo -e "${RED}[ERROR]${NC} $1"; }
 #  Pre-flight checks 
 
 
-log_info "Checking for Python3..."
+log_info "Checking for Python3"
 if ! command -v python3 &>/dev/null; then
     log_error "python3 not found. Please install it and retry."
     exit 1
 fi
 log_success "Python3 found: $(python3 --version)"
 
-log_info "Checking QMP socket at $QMP_SOCKET_PATH ..."
+log_info "Checking QMP socket at $QMP_SOCKET_PATH"
 if [ ! -S "$QMP_SOCKET_PATH" ]; then
     log_error "QMP socket not found at $QMP_SOCKET_PATH"
     log_warn  "Make sure QEMU is running with: -qmp unix:$QMP_SOCKET_PATH,server=on,wait=off"
@@ -37,7 +37,7 @@ fi
 log_success "QMP socket found."
 
 #  Write the Python injection payload 
-log_info "Writing poison_attack.py ..."
+log_info "Writing poison_attack.py"
 
 cat > "$POISON_SCRIPT" << 'PYEOF'
 import socket
@@ -48,9 +48,9 @@ import sys
 QMP_SOCKET_PATH = "/tmp/qmp-sock"
 
 def inject_cxl_poison():
-    print("  --> Initiating OS-First Self-Recovery Validation...")
+    print("  --> Initiating OS-First Self-Recovery Validation")
     time.sleep(0.5)
-    print("  --> Firing Tier 2 Data Poisoning Strike (DPA: 0x1000, Length: 64 bytes)...")
+    print("  --> Firing Tier 2 Data Poisoning Strike (DPA: 0x1000, Length: 64 bytes)")
     time.sleep(0.5)
 
     payload = {
@@ -108,10 +108,7 @@ log_success "poison_attack.py written to $POISON_SCRIPT"
 #  Execute 
 echo ""
 log_info "Executing poison injection..."
-echo "----------------------------------------------"
 python3 "$POISON_SCRIPT"
-echo "----------------------------------------------"
-echo ""
 log_success "Injection phase complete."
 log_info  "Now run detect_recover.sh INSIDE the Guest VM to detect and recover."
 echo ""

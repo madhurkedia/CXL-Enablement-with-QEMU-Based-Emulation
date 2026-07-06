@@ -14,7 +14,7 @@ MOUNT_B="/mnt/cxl-pool-b"
 
 # Step 0a: Ensure required tools are installed 
 guest_install_tools() {
-    info "Step 0a: Checking for required tools..."
+    info "Step 0a: Checking for required tools"
 
     local need_update=0
 
@@ -43,7 +43,7 @@ guest_install_tools() {
 
 # Step 0b: Guard — verify clflushopt is masked by clearcpuid
 guest_check_cpuflags() {
-    info "Step 0b: Checking CPU flags (clflushopt must be masked by host clearcpuid)..."
+    info "Step 0b: Checking CPU flags (clflushopt must be masked by host clearcpuid)"
 
     if grep -qw "clflushopt" /proc/cpuinfo; then
         die "FATAL: 'clflushopt' is still exposed to the guest."
@@ -73,7 +73,7 @@ guest_verify_topology() {
 guest_create_two_regions() {
     info "Step 2: Create Two Independent Regions"
 
-    info "Enabling all CXL memory devices..."
+    info "Enabling all CXL memory devices"
     sudo cxl enable-memdev all 2>/dev/null \
         || warn "enable-memdev: devices may already be enabled (safe to continue)"
 
@@ -164,7 +164,7 @@ guest_write_and_verify_checksums() {
     info "Step 6: Write Files and Verify Checksums"
 
     # Pool A 
-    info "Pool A: Writing 50 MiB random file..."
+    info "Pool A: Writing 50 MiB random file"
     dd if=/dev/urandom of="${MOUNT_A}/pool_a_data.bin" bs=1M count=50 status=progress
     sync
     echo "This file lives on CXL Pool A — Switch A (mem0 + mem1)" \
@@ -173,7 +173,7 @@ guest_write_and_verify_checksums() {
     info "Pool A checksum:"; cat "${MOUNT_A}/pool_a_data.sha256"
 
     # Pool B
-    info "Pool B: Writing 50 MiB random file..."
+    info "Pool B: Writing 50 MiB random file"
     dd if=/dev/urandom of="${MOUNT_B}/pool_b_data.bin" bs=1M count=50 status=progress
     sync
     echo "This file lives on CXL Pool B — Switch B (mem2 + mem3)" \
@@ -182,12 +182,12 @@ guest_write_and_verify_checksums() {
     info "Pool B checksum:"; cat "${MOUNT_B}/pool_b_data.sha256"
 
     # Verify
-    info "Verifying Pool A..."
+    info "Verifying Pool A"
     sha256sum -c "${MOUNT_A}/pool_a_data.sha256" \
         && success "Pool A: checksum PASSED — data integrity confirmed." \
         || die    "Pool A: checksum FAILED — data corruption detected!"
 
-    info "Verifying Pool B..."
+    info "Verifying Pool B"
     sha256sum -c "${MOUNT_B}/pool_b_data.sha256" \
         && success "Pool B: checksum PASSED — data integrity confirmed." \
         || die    "Pool B: checksum FAILED — data corruption detected!"

@@ -1,6 +1,6 @@
 #!/bin/bash
 # CXL Full Support — Error Injection and Topology Emulation Setup
-#
+
 # Objectives:
 #   - Builds a custom WSL2 kernel with KVM support
 #   - Builds QEMU (jic23 CXL fork) with 3 critical CXL RAS patches
@@ -73,7 +73,7 @@ echo "  Emulation Setup"
 echo ""
 
 phase1_dependencies() {
-    info "PHASE 1: Installing build dependencies..."
+    info "PHASE 1: Installing build dependencies"
 
     sudo apt-get update
     sudo apt-get install --no-install-recommends -y \
@@ -118,7 +118,7 @@ phase2_wsl2_kernel_only() {
         return 0
     fi
 
-    info "PHASE 2: Building custom WSL2 kernel with KVM support..."
+    info "PHASE 2: Building custom WSL2 kernel with KVM support"
 
     # Skip if KVM already loaded or .wslconfig already written
     if lsmod | grep -q kvm || [[ -f "/mnt/c/Users/${WINDOWS_USER}/.wslconfig" ]]; then
@@ -140,13 +140,13 @@ phase2_wsl2_kernel_only() {
     scripts/config --enable CONFIG_KVM_AMD
     make olddefconfig
 
-    info "Building WSL2 kernel — takes 20-40 minutes..."
+    info "Building WSL2 kernel — takes 20-40 minutes"
     make -j"$(nproc)"
 
     sudo cp arch/x86/boot/bzImage "${WINDOWS_PATH}/wsl_kernel"
     success "WSL2 kernel built and copied to ${WINDOWS_PATH}/wsl_kernel"
 
-    info "Writing .wslconfig automatically..."
+    info "Writing .wslconfig automatically"
     powershell.exe -Command "\$config = \"[wsl2]\`nkernel=C:\\\Users\\\\${WINDOWS_USER}\\\\wsl_kernel\"; Set-Content -Path \"\$env:USERPROFILE\\.wslconfig\" -Value \$config -Encoding UTF8"
     success ".wslconfig written to C:\\Users\\${WINDOWS_USER}\\.wslconfig"
 
@@ -161,11 +161,11 @@ phase2_wsl2_kernel_only() {
 }
 
 phase3_qemu() {
-    info "PHASE 3: Building QEMU (jic23 CXL fork) with CXL RAS patches..."
+    info "PHASE 3: Building QEMU (jic23 CXL fork) with CXL RAS patches"
 
     # Install KVM modules from WSL2 kernel if available
     if [[ "${IS_WSL}" == true ]] && [[ -d "${WSL_KERNEL_DIR}" ]]; then
-        info "Installing KVM kernel modules..."
+        info "Installing KVM kernel modules"
         cd "${WSL_KERNEL_DIR}"
         sudo make modules_install
         success "KVM modules installed."
@@ -183,7 +183,7 @@ phase3_qemu() {
     fi
 
     # PATCH 1: Unmask RAS Errors
-    info "Applying patch 1: CXL RAS error mask (cxl-component-utils.c)..."
+    info "Applying patch 1: CXL RAS error mask (cxl-component-utils.c)"
     if grep -q "R_CXL_RAS_UNC_ERR_MASK, 0);" hw/cxl/cxl-component-utils.c; then
         success "Patch 1 already applied, skipping."
     else
@@ -197,7 +197,7 @@ phase3_qemu() {
     fi
 
     # PATCH 2: PCIe AER correctable mask fix
-    info "Applying patch 2: PCIe AER correctable mask (cxl_type3.c)..."
+    info "Applying patch 2: PCIe AER correctable mask (cxl_type3.c)"
     if grep -q "PCI_ERR_COR_INTERNAL" hw/mem/cxl_type3.c; then
         success "Patch 2 already applied, skipping."
     else
@@ -209,7 +209,7 @@ phase3_qemu() {
     fi
 
     # PATCH 3: Set Partition Info mailbox command
-    info "Applying patch 3: Set Partition Info mailbox command..."
+    info "Applying patch 3: Set Partition Info mailbox command"
     python3 << 'PYEOF'
 path = 'hw/cxl/cxl-mailbox-utils.c'
 with open(path, 'r') as f:
@@ -267,7 +267,7 @@ with open(path, 'w') as f:
 print("  Patch 3 applied successfully.")
 PYEOF
 
-    info "Configuring and building QEMU..."
+    info "Configuring and building QEMU"
     mkdir -p build
     cd build
     ../configure \
@@ -290,13 +290,13 @@ PYEOF
 }
 
 phase4_guest_kernel() {
-    info "PHASE 4: Building Linux 6.18 guest kernel with CXL + RAS + PMEM..."
+    info "PHASE 4: Building Linux 6.18 guest kernel with CXL + RAS + PMEM"
    
     mkdir -p "${CXL_DIR}"
     cd "${CXL_DIR}"
 
     if [[ ! -d "linux" ]]; then
-        info "Cloning Linux 6.18 kernel..."
+        info "Cloning Linux 6.18 kernel"
         git clone https://github.com/torvalds/linux.git \
             --depth=1 -b v6.18 linux
     fi
@@ -369,7 +369,7 @@ phase4_guest_kernel() {
 
     make olddefconfig
 
-    info "Building guest kernel — takes 20-40 minutes..."
+    info "Building guest kernel — takes 20-40 minutes"
     make -j"$(nproc)"
 
     cp arch/x86/boot/bzImage "${CXL_LAB_DIR}/cxl_guest_kernel_lab"
@@ -377,7 +377,7 @@ phase4_guest_kernel() {
 }
 
 phase5_ovmf() {
-    info "Building OVMF UEFI firmware from edk2 source..."
+    info "Building OVMF UEFI firmware from edk2 source"
 
     local EDK2_DIR="${CXL_LAB_DIR}/edk2"
     local EDK2_GCC_TAG=""
@@ -394,7 +394,7 @@ phase5_ovmf() {
     cd "${EDK2_DIR}" || die "Failed to cd into ${EDK2_DIR}"
     git submodule update --init --recursive || die "Failed to update edk2 submodules."
 
-    info "Compiling edk2 BaseTools..."
+    info "Compiling edk2 BaseTools"
     make -C BaseTools -j"$(nproc)" || die "Failed to build BaseTools."
 
     export PYTHON3_ENABLE=TRUE
@@ -444,7 +444,7 @@ phase5_ovmf() {
 }
 
 phase6_images() {
-    info "PHASE 6: Setting up VM disk and CXL backing files..."
+    info "PHASE 6: Setting up VM disk and CXL backing files"
 
     mkdir -p "${CXL_DIR}"
     cd "${CXL_DIR}"
@@ -476,7 +476,7 @@ phase6_images() {
     chmod 660 "${CXL_DIR}"/cxl-*.raw
 
     if [[ ! -f "noble-server-cloudimg-amd64.img" ]]; then
-        info "Downloading Ubuntu 24.04 cloud image..."
+        info "Downloading Ubuntu 24.04 cloud image"
         wget -q --show-progress \
             https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img
     fi
@@ -516,7 +516,7 @@ METAEOF
 }
 
 phase7_launch_scripts() {
-    info "PHASE 7: Creating launch scripts..."
+    info "PHASE 7: Creating launch scripts"
 
     # start-cxl.sh
     cat > "${CXL_DIR}/start-cxl.sh" << 'EOF'
@@ -593,7 +593,7 @@ EOF
 }
 
 phase8_validate() {
-    info "PHASE 8: Validating complete environment..."
+    info "PHASE 8: Validating complete environment"
 
     local ok=true
 
